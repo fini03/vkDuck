@@ -11,3 +11,7 @@ Licenses for projects included through meson wrap files can be found in their re
 | [SDL3](https://github.com/libsdl-org/SDL) | zlib |
 | [shader-slang](https://github.com/shader-slang/slang) | MIT |
 | [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) | MIT |
+
+
+### Note
+The files in `external/utilities/` are copied from the [imgui-node-editor](https://github.com/thedmd/imgui-node-editor) project to enable the nice node layout functionality. Some stub methods were added to resolve compilation errors.
