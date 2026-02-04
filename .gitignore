@@ -1,41 +1,36 @@
-# Prerequisites
-*.d
+.DS_Store
+imgui.ini
+/build/*
+/icd.d/*
+/explicit_layer.d/*
+.cache
+/.vscode/*
+/subprojects/imgui
+/subprojects/inja
+/subprojects/imgui-node-editor
+/subprojects/packagecache
+/subprojects/shader-slang-*/
+/subprojects/shader-slang-*.wrap
+/subprojects/vulkan-memory-allocator/
+/subprojects/efsw/
+.gdb_history
+.gdbinit
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# debug information files
-*.dwo
+/project/imgui.ini
+/project/icd.d/*
+/project/explicit_layer.d/*
+/project/build/*
+/project/logs/*
+/project/compiled_shaders/*
+/project/subprojects/imgui
+/project/subprojects/vkDuck
+/project/subprojects/inja
+/project/subprojects/imgui-node-editor
+/project/subprojects/packagecache
+/project/subprojects/vulkan-memory-allocator
+/project/subprojects/shader-slang-*/
+/project/subprojects/shader-slang-*.wrap
+/project/data/textures/*
+/project/data/models/*
+/project/data/images/*
+/project/data/meshes/*

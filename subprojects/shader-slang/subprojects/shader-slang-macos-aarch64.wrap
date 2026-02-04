@@ -1,0 +1,9 @@
+[wrap-file]
+source_url = https://github.com/shader-slang/slang/releases/download/v2025.24.1/slang-2025.24.1-macos-aarch64.tar.gz
+source_filename = slang-2025.24.1-macos-aarch64.tar.gz
+source_hash = 91140d664ef3c98d467a739f492edce774853f7145e6e631120171074296bdbe
+lead_directory_missing = true
+patch_directory = libslang
+
+[provide]
+shader-slang-macos-aarch64 = slang_dep

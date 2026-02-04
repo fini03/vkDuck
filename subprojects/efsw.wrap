@@ -1,0 +1,8 @@
+[wrap-git]
+url = https://github.com/SpartanJ/efsw.git
+revision = master
+depth = 1
+method = cmake 
+
+[provide]
+efsw = efsw_dep
