@@ -29,7 +29,7 @@ public:
 private:
     PrimitiveGenerator primitiveGenerator;
 
-    void generateWrapFile(const std::filesystem::path& projectRoot);
+    void generateSDKLinks(const std::filesystem::path& projectRoot);
     void generateCameraInstances(primitives::Store& store, const std::filesystem::path& outputDir);
     void generatePrimitives(NodeGraph& graph, primitives::Store& store, const std::filesystem::path& outputDir);
     void generateRenderer(const primitives::Store& store, const std::filesystem::path& outputDir);

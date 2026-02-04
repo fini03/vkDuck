@@ -238,107 +238,132 @@ void FileGenerator::generateProject(
     // Generate main.cpp in src/
     generateMain(srcDir);
 
-    // Generate subproject wrap file and meson.build at project root
-    generateWrapFile(projectRoot);
+    // Link SDK and generate meson.build at project root
+    generateSDKLinks(projectRoot);
     generateMesonBuild(store, projectRoot);
 
     Log::info("FileGenerator", "Project generated to: {}", projectRoot.string());
 }
 
-void FileGenerator::generateWrapFile(const std::filesystem::path& projectRoot) {
+void FileGenerator::generateSDKLinks(const std::filesystem::path& projectRoot) {
     namespace fs = std::filesystem;
 
-    // Create subprojects directory
-    fs::path subprojectsDir = projectRoot / "subprojects";
-    fs::create_directories(subprojectsDir);
-
-    // Get the path to the editor's vkDuck library
-    // The library is now in subprojects/vkDuck (shared with the editor)
     fs::path editorRoot = fs::current_path();
-    fs::path vkDuckLibPath = editorRoot / "subprojects" / "vkDuck";
+    fs::path buildDir = editorRoot / "build";
+    fs::path subprojectsDir = projectRoot / "subprojects";
+    fs::path projectLib = projectRoot / "lib";
+    fs::path projectInclude = projectRoot / "include";
+    fs::path projectLicenses = projectRoot / "licenses";
 
-    // For local development: create a symlink to vkDuck
-    // This works on both macOS and Linux
-    fs::path linkPath = subprojectsDir / "vkDuck";
+    // Create directories
+    fs::create_directories(subprojectsDir);
+    fs::create_directories(projectLib);
+    fs::create_directories(projectInclude);
+    fs::create_directories(projectLicenses);
 
-    // Remove existing link/directory if present
     std::error_code ec;
-    if (fs::exists(linkPath, ec) || fs::is_symlink(linkPath)) {
-        fs::remove_all(linkPath, ec);
-        if (ec) {
-            Log::warning("FileGenerator", "Could not remove existing path: {}", ec.message());
-        }
+
+    // === Determine platform-specific library name ===
+#ifdef _WIN32
+    const std::string libName = "vkDuck.lib";
+#else
+    const std::string libName = "libvkDuck.a";
+#endif
+
+    // === Link pre-compiled vkDuck library from build directory ===
+    fs::path builtLib = buildDir / "subprojects" / "vkDuck" / libName;
+    if (!fs::exists(builtLib)) {
+        Log::error("FileGenerator", "vkDuck library not built at {}. Build the editor first with 'meson compile -C build'", builtLib.string());
+        return;
     }
 
-    // Create symlink (works on macOS, Linux, and Windows with appropriate permissions)
+    fs::path libLink = projectLib / libName;
+    if (fs::exists(libLink, ec) || fs::is_symlink(libLink)) {
+        fs::remove(libLink, ec);
+    }
+
     try {
-        fs::create_directory_symlink(vkDuckLibPath, linkPath);
-        Log::info("FileGenerator", "Created symlink: {} -> {}", linkPath.string(), vkDuckLibPath.string());
+        fs::create_symlink(builtLib, libLink);
+        Log::info("FileGenerator", "Linked vkDuck library from build directory");
     } catch (const fs::filesystem_error& e) {
-        // Symlink creation failed - try copying as fallback (especially useful on Windows)
-        Log::warning("FileGenerator", "Symlink failed ({}), copying directory instead", e.what());
-        try {
-            fs::copy(vkDuckLibPath, linkPath, fs::copy_options::recursive | fs::copy_options::overwrite_existing);
-            Log::info("FileGenerator", "Copied vkDuck to: {}", linkPath.string());
-        } catch (const fs::filesystem_error& copyError) {
-            Log::error("FileGenerator", "Failed to copy vkDuck: {}", copyError.what());
-            return;
-        }
+        // Symlinks may fail on Windows without admin privileges
+        fs::copy_file(builtLib, libLink, fs::copy_options::overwrite_existing);
+        Log::info("FileGenerator", "Copied vkDuck library from build directory");
     }
 
-    // Also generate a wrap-git file for distribution (when project is shared via git)
-    // Users can uncomment this and remove the symlink to fetch from remote
-    auto wrapFile = subprojectsDir / "vkDuck.wrap.example";
-    std::ofstream out(wrapFile, std::ios::trunc);
-    if (out.is_open()) {
-        print(out, "# Example wrap file for fetching vkDuck from git\n");
-        print(out, "# To use: rename this file to vkDuck.wrap and remove the vkDuck/ directory\n");
-        print(out, "[wrap-git]\n");
-        print(out, "directory = vkDuck\n");
-        print(out, "url = https://github.com/your-username/Vulkan-Editor.git\n");
-        print(out, "revision = head\n");
-        print(out, "depth = 1\n");
-        print(out, "clone-recursive = false\n\n");
-        print(out, "[provide]\n");
-        print(out, "vkDuck = vkDuck_dep\n");
-        Log::info("FileGenerator", "Generated example wrap file: {}", wrapFile.string());
+    // === Link vkDuck headers from source ===
+    fs::path vkDuckHeaders = editorRoot / "subprojects" / "vkDuck" / "include" / "vkDuck";
+    fs::path vkDuckLink = projectInclude / "vkDuck";
+    if (fs::exists(vkDuckLink, ec) || fs::is_symlink(vkDuckLink)) {
+        fs::remove_all(vkDuckLink, ec);
     }
 
-    // Copy dependency wrap files that vkDuck needs
-    // vkDuck's meson.build uses dependency() calls that need these wraps
+    try {
+        fs::create_directory_symlink(vkDuckHeaders, vkDuckLink);
+        Log::info("FileGenerator", "Linked vkDuck headers");
+    } catch (const fs::filesystem_error& e) {
+        fs::copy(vkDuckHeaders, vkDuckLink, fs::copy_options::recursive);
+        Log::info("FileGenerator", "Copied vkDuck headers");
+    }
+
+    // === Copy wrap files for dependencies (Meson handles the rest) ===
     fs::path editorSubprojects = editorRoot / "subprojects";
-
-    // List of wrap files to copy
     std::vector<std::string> wrapFiles = {
-        "vulkan-memory-allocator.wrap",
         "sdl3.wrap",
-        "glm.wrap"
+        "glm.wrap",
+        "vulkan-memory-allocator.wrap"
     };
 
     for (const auto& wrapName : wrapFiles) {
-        fs::path srcWrap = editorSubprojects / wrapName;
-        fs::path dstWrap = subprojectsDir / wrapName;
-        if (fs::exists(srcWrap)) {
+        fs::path src = editorSubprojects / wrapName;
+        fs::path dst = subprojectsDir / wrapName;
+        if (fs::exists(src)) {
             try {
-                fs::copy_file(srcWrap, dstWrap, fs::copy_options::overwrite_existing);
-                Log::info("FileGenerator", "Copied wrap file: {}", wrapName);
+                fs::copy_file(src, dst, fs::copy_options::overwrite_existing);
+                Log::info("FileGenerator", "Copied {}", wrapName);
             } catch (const fs::filesystem_error& e) {
                 Log::warning("FileGenerator", "Failed to copy {}: {}", wrapName, e.what());
             }
         }
     }
 
-    // Copy packagefiles directory (contains custom meson.build for VMA)
+    // Copy packagefiles for VMA custom meson.build
     fs::path srcPackagefiles = editorSubprojects / "packagefiles";
     fs::path dstPackagefiles = subprojectsDir / "packagefiles";
     if (fs::exists(srcPackagefiles)) {
         try {
-            fs::create_directories(dstPackagefiles);
-            fs::copy(srcPackagefiles, dstPackagefiles,
-                     fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+            if (fs::exists(dstPackagefiles)) {
+                fs::remove_all(dstPackagefiles);
+            }
+            fs::copy(srcPackagefiles, dstPackagefiles, fs::copy_options::recursive);
             Log::info("FileGenerator", "Copied packagefiles directory");
         } catch (const fs::filesystem_error& e) {
             Log::warning("FileGenerator", "Failed to copy packagefiles: {}", e.what());
+        }
+    }
+
+    // === Copy licenses ===
+    fs::path licensesDir = editorRoot / "licenses";
+    if (fs::exists(licensesDir)) {
+        try {
+            for (const auto& entry : fs::directory_iterator(licensesDir)) {
+                if (entry.is_directory()) {
+                    // Each license is in a subdirectory with LICENSE file
+                    fs::path licenseFile = entry.path() / "LICENSE";
+                    if (fs::exists(licenseFile)) {
+                        std::string name = entry.path().filename().string() + "-LICENSE";
+                        fs::copy_file(licenseFile, projectLicenses / name, fs::copy_options::overwrite_existing);
+                    }
+                }
+            }
+            // Copy main project license
+            fs::path mainLicense = editorRoot / "LICENSE";
+            if (fs::exists(mainLicense)) {
+                fs::copy_file(mainLicense, projectLicenses / "vkDuck-LICENSE", fs::copy_options::overwrite_existing);
+            }
+            Log::info("FileGenerator", "Copied licenses");
+        } catch (const fs::filesystem_error& e) {
+            Log::warning("FileGenerator", "Failed to copy licenses: {}", e.what());
         }
     }
 }
@@ -661,10 +686,24 @@ void FileGenerator::generateMesonBuild(const primitives::Store& store, const std
         "    'buildtype=debugoptimized'\n"
         "  ]\n"
         ")\n\n"
-        "# Use vkDuck from Vulkan-Editor (shared library)\n"
-        "vkDuck_proj = subproject('vkDuck')\n"
-        "vkDuck_dep = vkDuck_proj.get_variable('vkDuck_dep')\n\n"
-        "# Source files (only project-specific generated code)\n"
+        "# Dependencies (via Meson wraps)\n"
+        "vulkan_dep = dependency('vulkan')\n"
+        "sdl3_dep = dependency('sdl3')\n"
+        "glm_dep = dependency('glm')\n"
+        "vma_dep = dependency('vulkan-memory-allocator', include_type: 'system')\n\n"
+        "# Pre-compiled vkDuck library (built with Vulkan-Editor)\n"
+        "vkDuck_inc = include_directories('include')\n"
+        "cpp = meson.get_compiler('cpp')\n"
+        "vkDuck_lib = cpp.find_library('vkDuck',\n"
+        "  dirs: meson.current_source_dir() / 'lib',\n"
+        "  static: true\n"
+        ")\n\n"
+        "# Combine vkDuck with its dependencies\n"
+        "vkDuck_dep = declare_dependency(\n"
+        "  include_directories: vkDuck_inc,\n"
+        "  dependencies: [vkDuck_lib, vulkan_dep, sdl3_dep, glm_dep, vma_dep]\n"
+        ")\n\n"
+        "# Source files (project-specific generated code)\n"
         "sources = files(\n"
         "  'src/main.cpp',\n"
         "  'generated_files/primitives.cpp'"
@@ -679,7 +718,7 @@ void FileGenerator::generateMesonBuild(const primitives::Store& store, const std
         "# Include directories\n"
         "inc_dirs = include_directories('generated_files')\n\n"
         "# Compiler arguments\n"
-        "cpp_args = []\n\n"
+        "cpp_args = ['-DVKDUCK_NO_VMA_IMPLEMENTATION']\n\n"
         "if host_machine.system() == 'darwin'\n"
         "  cpp_args += ['-DVK_USE_PLATFORM_MACOS_MVK']\n"
         "elif host_machine.system() == 'linux'\n"

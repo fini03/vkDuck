@@ -53,3 +53,21 @@ vkDuck_dep = declare_dependency(
   link_with: vkDuck_lib,
   dependencies: [vulkan_dep, sdl3_dep, glm_dep, vma_dep]
 )
+
+# Install public headers for SDK distribution
+install_headers(
+  'include/vkDuck/vulkan_base.h',
+  'include/vkDuck/library.h',
+  'include/vkDuck/camera_controller.h',
+  'include/vkDuck/model_loader.h',
+  'include/vkDuck/image_loader.h',
+  subdir: 'vkDuck'
+)
+
+# Generate pkg-config file for system installations
+pkg = import('pkgconfig')
+pkg.generate(vkDuck_lib,
+  name: 'vkDuck',
+  description: 'Vulkan rendering library for generated projects',
+  requires: ['vulkan', 'sdl3']
+)
