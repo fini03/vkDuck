@@ -631,7 +631,7 @@ void PipelineNode::reconcilePins(
     inputBindings.clear();
     outputBindings.clear();
 
-    // Handle vertex data pin
+    // Handle vertex data pin - only show if shader has vertex inputs (VSInput struct)
     if (!shaderReflection.vertexAttributes.empty()) {
         auto it = oldPins.find("Vertex data");
         if (it != oldPins.end()) {
@@ -645,6 +645,10 @@ void PipelineNode::reconcilePins(
             vertexDataPin.type = PinType::VertexData;
             vertexDataPin.label = "Vertex data";
         }
+    } else {
+        // No vertex inputs in shader - clear the vertex data pin
+        vertexDataPin = Pin{};
+        Log::debug("Pipeline", "No vertex inputs found - vertex data pin cleared");
     }
 
     // Process bindings - REUSE existing pin IDs when possible
