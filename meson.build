@@ -83,7 +83,6 @@ external_files = files(
   'external/utilities/drawing.cpp',
   'external/utilities/widgets.cpp',
   'external/SimpleFileDialog.cpp',
-  'external/tinyxml2.cpp',
 )
 
 executable(
