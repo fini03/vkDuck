@@ -327,18 +327,19 @@ void FileGenerator::generateSDKLinks(const std::filesystem::path& projectRoot) {
         }
     }
 
-    // Copy packagefiles for VMA custom meson.build
-    fs::path srcPackagefiles = editorSubprojects / "packagefiles";
-    fs::path dstPackagefiles = subprojectsDir / "packagefiles";
-    if (fs::exists(srcPackagefiles)) {
+    // Copy only VMA packagefiles (not imgui/imgui-node-editor which are editor-only)
+    fs::path srcVmaPackage = editorSubprojects / "packagefiles" / "vulkan-memory-allocator";
+    fs::path dstVmaPackage = subprojectsDir / "packagefiles" / "vulkan-memory-allocator";
+    if (fs::exists(srcVmaPackage)) {
         try {
-            if (fs::exists(dstPackagefiles)) {
-                fs::remove_all(dstPackagefiles);
+            fs::create_directories(dstVmaPackage.parent_path());
+            if (fs::exists(dstVmaPackage)) {
+                fs::remove_all(dstVmaPackage);
             }
-            fs::copy(srcPackagefiles, dstPackagefiles, fs::copy_options::recursive);
-            Log::info("FileGenerator", "Copied packagefiles directory");
+            fs::copy(srcVmaPackage, dstVmaPackage, fs::copy_options::recursive);
+            Log::info("FileGenerator", "Copied VMA packagefiles");
         } catch (const fs::filesystem_error& e) {
-            Log::warning("FileGenerator", "Failed to copy packagefiles: {}", e.what());
+            Log::warning("FileGenerator", "Failed to copy VMA packagefiles: {}", e.what());
         }
     }
 
