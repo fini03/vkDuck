@@ -8,6 +8,9 @@
 #include <vk_mem_alloc.h>
 #include <vulkan/vulkan_core.h>
 
+// Use shared camera types from vkDuck library
+#include <vkDuck/camera_controller.h>
+
 /**
  * @namespace primitives
  * @brief GPU resource primitives for Vulkan rendering and code generation.
@@ -34,18 +37,14 @@ enum class Type : uint8_t {
     Invalid
 };
 
-enum class CameraType : uint8_t { Fixed, FPS, Orbital };
+// CameraType and CameraData are now provided by vkDuck/camera_controller.h
+using ::CameraType;
+using ::CameraData;
 
 enum class UniformDataType : uint8_t {
     Camera,
     Light,
     Other
-};
-
-struct CameraData {
-    alignas(16) glm::mat4 view{1.0f};
-    alignas(16) glm::mat4 invView{1.0f};
-    alignas(16) glm::mat4 proj{1.0f};
 };
 
 struct alignas(16) LightData {

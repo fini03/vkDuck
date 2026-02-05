@@ -10,6 +10,9 @@
 #include <nlohmann/json.hpp>
 #include <string>
 
+// Use shared types from vkDuck library
+#include <vkDuck/model_loader.h>
+
 namespace tinygltf {
 class Model;
 struct Node;
@@ -17,78 +20,8 @@ struct Node;
 
 using namespace ShaderTypes;
 
-struct Vertex {
-    glm::vec3 pos;
-    glm::vec3 normal;
-    glm::vec2 texCoord;
-
-    static VkVertexInputBindingDescription getBindingDescription() {
-        VkVertexInputBindingDescription bindingDescription{};
-        bindingDescription.binding = 0;
-        bindingDescription.stride = sizeof(Vertex);
-        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-        return bindingDescription;
-    }
-
-    static std::vector<VkVertexInputAttributeDescription>
-    getAttributeDescriptions() {
-        std::vector<VkVertexInputAttributeDescription>
-            attributeDescriptions(3);
-
-        attributeDescriptions[0].binding = 0;
-        attributeDescriptions[0].location = 0;
-        attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[0].offset = offsetof(Vertex, pos);
-
-        attributeDescriptions[1].binding = 0;
-        attributeDescriptions[1].location = 1;
-        attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[1].offset = offsetof(Vertex, normal);
-
-        attributeDescriptions[2].binding = 0;
-        attributeDescriptions[2].location = 2;
-        attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
-        attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
-
-        return attributeDescriptions;
-    }
-
-    bool operator==(const Vertex& other) const {
-        return pos == other.pos && normal == other.normal &&
-               texCoord == other.texCoord;
-    }
-};
-
-namespace std {
-template <>
-struct hash<glm::vec2> {
-    size_t operator()(glm::vec2 const& vec) const {
-        return (hash<float>()(vec.x) ^ (hash<float>()(vec.y) << 1)) >>
-               1;
-    }
-};
-
-template <>
-struct hash<glm::vec3> {
-    size_t operator()(glm::vec3 const& vec) const {
-        return ((hash<float>()(vec.x) ^ (hash<float>()(vec.y) << 1)) >>
-                1) ^
-               (hash<float>()(vec.z) << 1);
-    }
-};
-
-template <>
-struct hash<Vertex> {
-    size_t operator()(Vertex const& vertex) const {
-        return ((hash<glm::vec3>()(vertex.pos) ^
-                 (hash<glm::vec3>()(vertex.normal) << 1)) >>
-                1) ^
-               (hash<glm::vec2>()(vertex.texCoord) << 1);
-    }
-};
-} // namespace std
-
-struct Image {
+// Editor-specific types (renamed to avoid conflicts with vkDuck types)
+struct EditorImage {
     std::filesystem::path path{};
     void* pixels{nullptr};
     bool toLoad{false};
@@ -98,14 +31,15 @@ struct Image {
 
     primitives::StoreHandle image{};
 
-    ~Image();
+    ~EditorImage();
 };
 
-struct Material {
+struct EditorMaterial {
     int baseTextureIndex{-1};
 };
 
-struct GeometryRange {
+// Editor's GeometryRange includes topology field (vkDuck's doesn't)
+struct EditorGeometryRange {
     uint32_t firstVertex;
     uint32_t vertexCount;
     uint32_t firstIndex;
@@ -114,7 +48,7 @@ struct GeometryRange {
     VkPrimitiveTopology topology;
 };
 
-struct Geometry {
+struct EditorGeometry {
     std::vector<Vertex> m_vertices;
     std::vector<uint32_t> m_indices;
     VkBuffer m_vertexBuffer;
@@ -127,15 +61,15 @@ struct Geometry {
 struct ConsolidatedModelData {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
-    std::vector<GeometryRange> ranges;
+    std::vector<EditorGeometryRange> ranges;
 
     VkBuffer vertexBuffer = VK_NULL_HANDLE;
     VmaAllocation vertexBufferAllocation = VK_NULL_HANDLE;
     VkBuffer indexBuffer = VK_NULL_HANDLE;
     VmaAllocation indexBufferAllocation = VK_NULL_HANDLE;
 
-    void addGeometry(const Geometry& geom, VkPrimitiveTopology topology) {
-        GeometryRange range;
+    void addGeometry(const EditorGeometry& geom, VkPrimitiveTopology topology) {
+        EditorGeometryRange range;
         range.firstVertex = static_cast<uint32_t>(vertices.size());
         range.vertexCount = static_cast<uint32_t>(geom.m_vertices.size());
         range.firstIndex = static_cast<uint32_t>(indices.size());
@@ -180,18 +114,7 @@ struct ModelCameraData {
     alignas(16) glm::mat4 proj{1.0f};
 };
 
-struct GLTFCamera {
-    std::string name;
-    bool isPerspective{true};
-    float fov{45.0f};
-    float aspectRatio{0.0f};
-    float nearPlane{0.1f};
-    float farPlane{1000.0f};
-    float xmag{1.0f};
-    float ymag{1.0f};
-    glm::vec3 position{0.0f, 0.0f, 5.0f};
-    glm::mat4 transform{1.0f};
-};
+// GLTFCamera is now provided by vkDuck/model_loader.h
 
 struct ModelSettings : public ISerializable {
     char modelPath[256] = "";
@@ -275,9 +198,9 @@ public:
     Pin vertexDataPin;
     Pin cameraPin;
 
-    std::vector<Geometry> geometries;
-    std::vector<Material> materials;
-    std::vector<Image> images;
+    std::vector<EditorGeometry> geometries;
+    std::vector<EditorMaterial> materials;
+    std::vector<EditorImage> images;
 
     std::vector<GLTFCamera> gltfCameras;
     int selectedCameraIndex{-1};
@@ -323,7 +246,7 @@ private:
 
     void consolidateGeometries();
 
-    Image defaultTexture{};
+    EditorImage defaultTexture{};
 
     primitives::StoreHandle baseTextureArray{};
     primitives::StoreHandle vertexDataArray{};

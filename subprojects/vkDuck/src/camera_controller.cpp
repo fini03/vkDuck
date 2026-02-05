@@ -162,4 +162,12 @@ void CameraController::updateTargetFromOrientation() {
     target = position + front * 5.0f;
 }
 
+CameraData CameraController::getCameraData() const {
+    CameraData data;
+    data.view = getViewMatrix();
+    data.invView = glm::inverse(data.view);
+    data.proj = getProjectionMatrix();
+    return data;
+}
+
 // }}}

@@ -1,6 +1,5 @@
 #include "model_node.h"
 #include "node_graph.h"
-#include "vulkan_editor/io/image_loader.h"
 #include "vulkan_editor/util/logger.h"
 #include <cmath>
 #include <cstring>
@@ -11,13 +10,8 @@
 #include <thread>
 #include <vulkan/vk_enum_string_helper.h>
 
-#if defined(__ARM_NEON) || defined(__ARM_NEON__)
-#include <arm_neon.h>
-#define USE_NEON 1
-#elif defined(__SSE4_1__)
-#include <smmintrin.h>
-#define USE_SSE 1
-#endif
+// Use vkDuck's image loader
+#include <vkDuck/image_loader.h>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -28,6 +22,8 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/quaternion.hpp>
 
+// TinyGLTF implementation for editor's model loading
+// Note: vkDuck also has its own implementation for generated projects
 #define TINYGLTF_IMPLEMENTATION
 #define TINYGLTF_NO_STB_IMAGE
 #define TINYGLTF_NO_EXTERNAL_IMAGE
@@ -67,92 +63,7 @@ const std::vector<const char*> ModelNode::topologyOptions =
         topologyOptionsEnum, string_VkPrimitiveTopology
     );
 
-// SIMD-optimized index conversion for better throughput
-static inline void convertIndices16to32(
-    const uint16_t* __restrict src,
-    uint32_t* __restrict dst,
-    size_t count
-) {
-#if defined(USE_NEON)
-    // ARM NEON: process 8 indices at a time
-    size_t simdCount = count / 8;
-    for (size_t i = 0; i < simdCount; ++i) {
-        uint16x8_t in = vld1q_u16(src + i * 8);
-        uint32x4_t lo = vmovl_u16(vget_low_u16(in));
-        uint32x4_t hi = vmovl_u16(vget_high_u16(in));
-        vst1q_u32(dst + i * 8, lo);
-        vst1q_u32(dst + i * 8 + 4, hi);
-    }
-    for (size_t i = simdCount * 8; i < count; ++i) {
-        dst[i] = src[i];
-    }
-#elif defined(USE_SSE)
-    // SSE4.1: process 8 indices at a time
-    size_t simdCount = count / 8;
-    for (size_t i = 0; i < simdCount; ++i) {
-        __m128i in = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i * 8));
-        __m128i lo = _mm_cvtepu16_epi32(in);
-        __m128i hi = _mm_cvtepu16_epi32(_mm_srli_si128(in, 8));
-        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + i * 8), lo);
-        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + i * 8 + 4), hi);
-    }
-    for (size_t i = simdCount * 8; i < count; ++i) {
-        dst[i] = src[i];
-    }
-#else
-    // Fallback: compiler will auto-vectorize this simple loop
-    for (size_t i = 0; i < count; ++i) {
-        dst[i] = src[i];
-    }
-#endif
-}
-
-static inline void convertIndices8to32(
-    const uint8_t* __restrict src,
-    uint32_t* __restrict dst,
-    size_t count
-) {
-#if defined(USE_NEON)
-    // ARM NEON: process 16 indices at a time
-    size_t simdCount = count / 16;
-    for (size_t i = 0; i < simdCount; ++i) {
-        uint8x16_t in = vld1q_u8(src + i * 16);
-        uint16x8_t mid_lo = vmovl_u8(vget_low_u8(in));
-        uint16x8_t mid_hi = vmovl_u8(vget_high_u8(in));
-        vst1q_u32(dst + i * 16, vmovl_u16(vget_low_u16(mid_lo)));
-        vst1q_u32(dst + i * 16 + 4, vmovl_u16(vget_high_u16(mid_lo)));
-        vst1q_u32(dst + i * 16 + 8, vmovl_u16(vget_low_u16(mid_hi)));
-        vst1q_u32(dst + i * 16 + 12, vmovl_u16(vget_high_u16(mid_hi)));
-    }
-    for (size_t i = simdCount * 16; i < count; ++i) {
-        dst[i] = src[i];
-    }
-#elif defined(USE_SSE)
-    // SSE4.1: process 16 indices at a time
-    size_t simdCount = count / 16;
-    for (size_t i = 0; i < simdCount; ++i) {
-        __m128i in = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i * 16));
-        __m128i a = _mm_cvtepu8_epi32(in);
-        __m128i b = _mm_cvtepu8_epi32(_mm_srli_si128(in, 4));
-        __m128i c = _mm_cvtepu8_epi32(_mm_srli_si128(in, 8));
-        __m128i d = _mm_cvtepu8_epi32(_mm_srli_si128(in, 12));
-        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + i * 16), a);
-        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + i * 16 + 4), b);
-        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + i * 16 + 8), c);
-        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + i * 16 + 12), d);
-    }
-    for (size_t i = simdCount * 16; i < count; ++i) {
-        dst[i] = src[i];
-    }
-#else
-    // Fallback: compiler will auto-vectorize this simple loop
-    for (size_t i = 0; i < count; ++i) {
-        dst[i] = src[i];
-    }
-#endif
-}
-
-/// Try multiple paths to find the texture (all project-relative)
+// Texture path resolution for editor (uses simple search paths)
 static fs::path findTexturePath(
     const fs::path& parentPath,
     const fs::path& projectRoot,
@@ -162,42 +73,26 @@ static fs::path findTexturePath(
     if (fs::exists(texturePath))
         return texturePath;
 
-    // Try sibling "images" folder (e.g.,
-    // data/models/../images/texture.png)
+    // Try sibling "images" folder
     auto siblingImagesPath = parentPath.parent_path() / "images" / uri;
-    if (std::filesystem::exists(siblingImagesPath)) {
-        Log::debug(
-            "Model", "Found texture in sibling images folder: {}",
-            siblingImagesPath.string()
-        );
+    if (fs::exists(siblingImagesPath)) {
         return siblingImagesPath;
     }
 
     if (projectRoot.empty()) {
-        Log::warning(
-            "Model",
-            "Texture not found and no project root provided: {}", uri
-        );
         return texturePath;
     }
 
     // Try data/images relative to project root
     auto dataImagesPath = projectRoot / "data" / "images" / uri;
     if (fs::exists(dataImagesPath)) {
-        Log::debug(
-            "Model", "Found texture in project data/images: {}",
-            dataImagesPath.string()
-        );
         return dataImagesPath;
     }
 
-    Log::warning(
-        "Model", "Texture not found in any search path: {}", uri
-    );
     return texturePath;
 }
 
-// Batch resolve texture paths in parallel to reduce syscall overhead
+// Batch resolve texture paths
 static std::vector<fs::path> findTexturePathsBatch(
     const fs::path& parentPath,
     const fs::path& projectRoot,
@@ -210,35 +105,14 @@ static std::vector<fs::path> findTexturePathsBatch(
         return resolvedPaths;
     }
 
-    // For small batches, just do it sequentially
-    if (texturesToResolve.size() < 4) {
-        for (const auto& [index, uri] : texturesToResolve) {
-            resolvedPaths[index] = findTexturePath(parentPath, projectRoot, uri);
-        }
-        return resolvedPaths;
-    }
-
-    // Resolve paths in parallel for larger batches
-    std::vector<std::future<std::pair<size_t, fs::path>>> futures;
-    futures.reserve(texturesToResolve.size());
-
     for (const auto& [index, uri] : texturesToResolve) {
-        futures.push_back(std::async(std::launch::async,
-            [&parentPath, &projectRoot, index, uri]() {
-                return std::make_pair(index, findTexturePath(parentPath, projectRoot, uri));
-            }
-        ));
-    }
-
-    for (auto& future : futures) {
-        auto [index, path] = future.get();
-        resolvedPaths[index] = std::move(path);
+        resolvedPaths[index] = findTexturePath(parentPath, projectRoot, uri);
     }
 
     return resolvedPaths;
 }
 
-// Parallel image loading result
+// Parallel image loading result (uses vkDuck's imageLoad)
 struct DecodedImageResult {
     void* pixels{nullptr};
     uint32_t width{0};
@@ -275,7 +149,7 @@ static std::vector<DecodedImageResult> loadImagesParallel(
     return results;
 }
 
-Image::~Image() {
+EditorImage::~EditorImage() {
     if (pixels)
         imageFree(pixels);
 }
@@ -842,7 +716,7 @@ void ModelNode::processNode(
 
     const auto& mesh = model.meshes[node.mesh];
     for (const auto& primitive : mesh.primitives) {
-        Geometry geometry{};
+        EditorGeometry geometry{};
 
         // Set the topology from the glTF primitive mode
         int mode = (primitive.mode == -1) ? 4 : primitive.mode;
@@ -1002,7 +876,7 @@ void ModelNode::processNode(
             const size_t indexCount = indexAccessor.count;
             geometry.m_indices.resize(indexCount);
 
-            // Fast path: copy indices directly based on component type
+            // Copy indices based on component type
             switch (indexAccessor.componentType) {
             case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
                 std::memcpy(
@@ -1013,11 +887,15 @@ void ModelNode::processNode(
             case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: {
                 const uint16_t* src =
                     reinterpret_cast<const uint16_t*>(indexData);
-                convertIndices16to32(src, geometry.m_indices.data(), indexCount);
+                for (size_t i = 0; i < indexCount; ++i) {
+                    geometry.m_indices[i] = src[i];
+                }
                 break;
             }
             case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: {
-                convertIndices8to32(indexData, geometry.m_indices.data(), indexCount);
+                for (size_t i = 0; i < indexCount; ++i) {
+                    geometry.m_indices[i] = indexData[i];
+                }
                 break;
             }
             default:

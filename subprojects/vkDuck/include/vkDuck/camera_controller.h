@@ -6,6 +6,14 @@
 // Camera controller types
 enum class CameraType { Fixed, FPS, Orbital };
 
+// GPU-ready camera data structure {{{
+struct CameraData {
+    alignas(16) glm::mat4 view{1.0f};
+    alignas(16) glm::mat4 invView{1.0f};
+    alignas(16) glm::mat4 proj{1.0f};
+};
+// }}}
+
 // Camera controller class for FPS and Orbital cameras {{{
 class CameraController {
 public:
@@ -72,6 +80,9 @@ public:
 
     // Set aspect ratio (should be called when window/swapchain is resized)
     void setAspectRatio(float ratio) { aspectRatio = ratio; }
+
+    // Get GPU-ready camera data (view, invView, proj matrices)
+    CameraData getCameraData() const;
 
 private:
     // Helper for orbital camera

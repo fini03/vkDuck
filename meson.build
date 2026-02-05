@@ -53,7 +53,7 @@ editor_files = files(
   'vulkan_editor/io/file_generator.cpp',
   'vulkan_editor/io/primitive_generator.cpp',
   'vulkan_editor/io/graph_serializer.cpp',
-  'vulkan_editor/io/image_loader.cpp',
+  # image_loader.cpp removed - using vkDuck library's image_loader
   'vulkan_editor/io/directory_watcher.cpp',
   'vulkan_editor/io/model_watcher.cpp',
 

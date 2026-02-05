@@ -14,13 +14,183 @@
 #include <glm/gtc/quaternion.hpp>
 #include <chrono>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <unordered_map>
 #include <future>
 
+// SIMD headers for optimized index conversion
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#define USE_NEON 1
+#elif defined(__SSE4_1__)
+#include <smmintrin.h>
+#define USE_SSE 1
+#endif
+
 // Internal helper functions {{{
 namespace {
+
+namespace fs = std::filesystem;
+
+// SIMD-optimized index conversion for better throughput {{{
+static inline void convertIndices16to32(
+    const uint16_t* __restrict src,
+    uint32_t* __restrict dst,
+    size_t count
+) {
+#if defined(USE_NEON)
+    // ARM NEON: process 8 indices at a time
+    size_t simdCount = count / 8;
+    for (size_t i = 0; i < simdCount; ++i) {
+        uint16x8_t in = vld1q_u16(src + i * 8);
+        uint32x4_t lo = vmovl_u16(vget_low_u16(in));
+        uint32x4_t hi = vmovl_u16(vget_high_u16(in));
+        vst1q_u32(dst + i * 8, lo);
+        vst1q_u32(dst + i * 8 + 4, hi);
+    }
+    for (size_t i = simdCount * 8; i < count; ++i) {
+        dst[i] = src[i];
+    }
+#elif defined(USE_SSE)
+    // SSE4.1: process 8 indices at a time
+    size_t simdCount = count / 8;
+    for (size_t i = 0; i < simdCount; ++i) {
+        __m128i in = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i * 8));
+        __m128i lo = _mm_cvtepu16_epi32(in);
+        __m128i hi = _mm_cvtepu16_epi32(_mm_srli_si128(in, 8));
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + i * 8), lo);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + i * 8 + 4), hi);
+    }
+    for (size_t i = simdCount * 8; i < count; ++i) {
+        dst[i] = src[i];
+    }
+#else
+    // Fallback: compiler will auto-vectorize this simple loop
+    for (size_t i = 0; i < count; ++i) {
+        dst[i] = src[i];
+    }
+#endif
+}
+
+static inline void convertIndices8to32(
+    const uint8_t* __restrict src,
+    uint32_t* __restrict dst,
+    size_t count
+) {
+#if defined(USE_NEON)
+    // ARM NEON: process 16 indices at a time
+    size_t simdCount = count / 16;
+    for (size_t i = 0; i < simdCount; ++i) {
+        uint8x16_t in = vld1q_u8(src + i * 16);
+        uint16x8_t mid_lo = vmovl_u8(vget_low_u8(in));
+        uint16x8_t mid_hi = vmovl_u8(vget_high_u8(in));
+        vst1q_u32(dst + i * 16, vmovl_u16(vget_low_u16(mid_lo)));
+        vst1q_u32(dst + i * 16 + 4, vmovl_u16(vget_high_u16(mid_lo)));
+        vst1q_u32(dst + i * 16 + 8, vmovl_u16(vget_low_u16(mid_hi)));
+        vst1q_u32(dst + i * 16 + 12, vmovl_u16(vget_high_u16(mid_hi)));
+    }
+    for (size_t i = simdCount * 16; i < count; ++i) {
+        dst[i] = src[i];
+    }
+#elif defined(USE_SSE)
+    // SSE4.1: process 16 indices at a time
+    size_t simdCount = count / 16;
+    for (size_t i = 0; i < simdCount; ++i) {
+        __m128i in = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i * 16));
+        __m128i a = _mm_cvtepu8_epi32(in);
+        __m128i b = _mm_cvtepu8_epi32(_mm_srli_si128(in, 4));
+        __m128i c = _mm_cvtepu8_epi32(_mm_srli_si128(in, 8));
+        __m128i d = _mm_cvtepu8_epi32(_mm_srli_si128(in, 12));
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + i * 16), a);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + i * 16 + 4), b);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + i * 16 + 8), c);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + i * 16 + 12), d);
+    }
+    for (size_t i = simdCount * 16; i < count; ++i) {
+        dst[i] = src[i];
+    }
+#else
+    // Fallback: compiler will auto-vectorize this simple loop
+    for (size_t i = 0; i < count; ++i) {
+        dst[i] = src[i];
+    }
+#endif
+}
+// }}}
+
+// Texture path resolution {{{
+/// Try multiple paths to find the texture (all project-relative)
+static fs::path findTexturePath(
+    const fs::path& parentPath,
+    const fs::path& projectRoot,
+    std::string_view uri
+) {
+    auto texturePath = parentPath / uri;
+    if (fs::exists(texturePath))
+        return texturePath;
+
+    // Try sibling "images" folder (e.g., data/models/../images/texture.png)
+    auto siblingImagesPath = parentPath.parent_path() / "images" / uri;
+    if (fs::exists(siblingImagesPath)) {
+        return siblingImagesPath;
+    }
+
+    if (projectRoot.empty()) {
+        return texturePath;
+    }
+
+    // Try data/images relative to project root
+    auto dataImagesPath = projectRoot / "data" / "images" / uri;
+    if (fs::exists(dataImagesPath)) {
+        return dataImagesPath;
+    }
+
+    return texturePath;
+}
+
+/// Batch resolve texture paths in parallel to reduce syscall overhead
+static std::vector<fs::path> findTexturePathsBatch(
+    const fs::path& parentPath,
+    const fs::path& projectRoot,
+    const std::vector<std::pair<size_t, std::string>>& texturesToResolve,
+    size_t totalImages
+) {
+    std::vector<fs::path> resolvedPaths(totalImages);
+
+    if (texturesToResolve.empty()) {
+        return resolvedPaths;
+    }
+
+    // For small batches, just do it sequentially
+    if (texturesToResolve.size() < 4) {
+        for (const auto& [index, uri] : texturesToResolve) {
+            resolvedPaths[index] = findTexturePath(parentPath, projectRoot, uri);
+        }
+        return resolvedPaths;
+    }
+
+    // Resolve paths in parallel for larger batches
+    std::vector<std::future<std::pair<size_t, fs::path>>> futures;
+    futures.reserve(texturesToResolve.size());
+
+    for (const auto& [index, uri] : texturesToResolve) {
+        futures.push_back(std::async(std::launch::async,
+            [&parentPath, &projectRoot, index, uri]() {
+                return std::make_pair(index, findTexturePath(parentPath, projectRoot, uri));
+            }
+        ));
+    }
+
+    for (auto& future : futures) {
+        auto [index, path] = future.get();
+        resolvedPaths[index] = std::move(path);
+    }
+
+    return resolvedPaths;
+}
+// }}}
 
 glm::mat4 getNodeTransform(const tinygltf::Node& node) {
     glm::mat4 transform(1.0f);
@@ -174,22 +344,18 @@ void processNode(
                 const size_t indexCount = indexAccessor.count;
                 geometry.indices.resize(indexCount);
 
-                // Fast path: copy indices directly based on component type
+                // Fast path: copy indices directly based on component type (with SIMD optimization)
                 switch (indexAccessor.componentType) {
                 case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
                     std::memcpy(geometry.indices.data(), indexData, indexCount * sizeof(uint32_t));
                     break;
                 case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: {
                     const uint16_t* src = reinterpret_cast<const uint16_t*>(indexData);
-                    for (size_t i = 0; i < indexCount; ++i) {
-                        geometry.indices[i] = src[i];
-                    }
+                    convertIndices16to32(src, geometry.indices.data(), indexCount);
                     break;
                 }
                 case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: {
-                    for (size_t i = 0; i < indexCount; ++i) {
-                        geometry.indices[i] = indexData[i];
-                    }
+                    convertIndices8to32(indexData, geometry.indices.data(), indexCount);
                     break;
                 }
                 default:
@@ -208,12 +374,40 @@ void processNode(
     }
 }
 
+// Process camera node transforms
+void processCameraNode(
+    tinygltf::Model& model,
+    int nodeIndex,
+    const glm::mat4& parentTransform,
+    std::vector<GLTFCamera>& cameras
+) {
+    if (nodeIndex < 0 || static_cast<size_t>(nodeIndex) >= model.nodes.size())
+        return;
+
+    const tinygltf::Node& node = model.nodes[nodeIndex];
+    glm::mat4 localTransform = getNodeTransform(node);
+    glm::mat4 worldTransform = parentTransform * localTransform;
+
+    // Check if this node has a camera
+    if (node.camera >= 0 && static_cast<size_t>(node.camera) < cameras.size()) {
+        GLTFCamera& cam = cameras[node.camera];
+        cam.transform = worldTransform;
+        // Extract position from transform matrix
+        cam.position = glm::vec3(worldTransform[3]);
+    }
+
+    // Process children
+    for (int child : node.children) {
+        processCameraNode(model, child, worldTransform, cameras);
+    }
+}
+
 } // anonymous namespace
 // }}}
 
 // Model loading implementation {{{
 
-ModelData loadModel(const std::string& path) {
+ModelData loadModel(const std::string& path, const std::string& projectRoot) {
     auto totalStart = std::chrono::high_resolution_clock::now();
 
     tinygltf::Model model;
@@ -254,6 +448,67 @@ ModelData loadModel(const std::string& path) {
 
     // Consolidate all geometries into single buffers
     ModelData result;
+
+    // Extract cameras from GLTF {{{
+    for (size_t i = 0; i < model.cameras.size(); ++i) {
+        const auto& gltfCam = model.cameras[i];
+        GLTFCamera cam;
+        cam.name = gltfCam.name.empty() ? "Camera " + std::to_string(i) : gltfCam.name;
+
+        if (gltfCam.type == "perspective") {
+            cam.isPerspective = true;
+            cam.fov = glm::degrees(static_cast<float>(gltfCam.perspective.yfov));
+            cam.aspectRatio = static_cast<float>(gltfCam.perspective.aspectRatio);
+            cam.nearPlane = static_cast<float>(gltfCam.perspective.znear);
+            cam.farPlane = static_cast<float>(gltfCam.perspective.zfar);
+        } else if (gltfCam.type == "orthographic") {
+            cam.isPerspective = false;
+            cam.xmag = static_cast<float>(gltfCam.orthographic.xmag);
+            cam.ymag = static_cast<float>(gltfCam.orthographic.ymag);
+            cam.nearPlane = static_cast<float>(gltfCam.orthographic.znear);
+            cam.farPlane = static_cast<float>(gltfCam.orthographic.zfar);
+        }
+
+        result.cameras.push_back(cam);
+    }
+
+    // Find camera transforms from scene nodes
+    for (int sceneIndex : model.scenes[defaultScene].nodes) {
+        processCameraNode(model, sceneIndex, glm::mat4(1.0f), result.cameras);
+    }
+    // }}}
+
+    // Extract texture paths {{{
+    fs::path parentPath = fs::path(path).parent_path();
+    fs::path projRoot = projectRoot.empty() ? fs::path() : fs::path(projectRoot);
+
+    // Collect texture URIs for batch resolution
+    std::vector<std::pair<size_t, std::string>> texturesToResolve;
+    texturesToResolve.reserve(model.textures.size());
+    for (const auto& tex : model.textures) {
+        if (tex.source >= 0 && static_cast<size_t>(tex.source) < model.images.size()) {
+            texturesToResolve.emplace_back(tex.source, model.images[tex.source].uri);
+        }
+    }
+
+    // Resolve all texture paths in parallel
+    auto resolvedPaths = findTexturePathsBatch(
+        parentPath, projRoot, texturesToResolve, model.images.size()
+    );
+
+    // Store resolved texture paths (one per material)
+    result.texturePaths.resize(model.materials.size());
+    for (size_t i = 0; i < model.materials.size(); ++i) {
+        const auto& mat = model.materials[i];
+        int texIndex = mat.pbrMetallicRoughness.baseColorTexture.index;
+        if (texIndex >= 0 && static_cast<size_t>(texIndex) < model.textures.size()) {
+            int imageIndex = model.textures[texIndex].source;
+            if (imageIndex >= 0 && static_cast<size_t>(imageIndex) < resolvedPaths.size()) {
+                result.texturePaths[i] = resolvedPaths[imageIndex].string();
+            }
+        }
+    }
+    // }}}
 
     // Pre-allocate result vectors to avoid reallocations
     {

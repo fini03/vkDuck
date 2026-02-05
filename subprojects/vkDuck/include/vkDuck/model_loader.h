@@ -42,6 +42,26 @@ struct Vertex {
 
         return attributeDescriptions;
     }
+
+    bool operator==(const Vertex& other) const {
+        return pos == other.pos && normal == other.normal &&
+               texCoord == other.texCoord;
+    }
+};
+// }}}
+
+// GLTFCamera structure for embedded cameras in GLTF files {{{
+struct GLTFCamera {
+    std::string name;
+    bool isPerspective{true};
+    float fov{45.0f};
+    float aspectRatio{0.0f};
+    float nearPlane{0.1f};
+    float farPlane{1000.0f};
+    float xmag{1.0f};   // Orthographic
+    float ymag{1.0f};   // Orthographic
+    glm::vec3 position{0.0f, 0.0f, 5.0f};
+    glm::mat4 transform{1.0f};
 };
 // }}}
 
@@ -58,14 +78,17 @@ struct ModelData {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     std::vector<GeometryRange> ranges;
+    std::vector<GLTFCamera> cameras;        // Embedded cameras from GLTF
+    std::vector<std::string> texturePaths;  // Resolved texture paths per material
 };
 // }}}
 
 // Model loading functions {{{
 /// Load a GLTF/GLB model and return all geometry data
 /// @param path Path to the model file (.gltf or .glb)
-/// @return ModelData containing all vertices, indices, and geometry ranges
-ModelData loadModel(const std::string& path);
+/// @param projectRoot Optional project root for texture path resolution
+/// @return ModelData containing all vertices, indices, geometry ranges, cameras, and texture paths
+ModelData loadModel(const std::string& path, const std::string& projectRoot = "");
 
 /// Load multiple models asynchronously in parallel
 /// @param paths Vector of paths to model files
