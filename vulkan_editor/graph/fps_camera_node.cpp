@@ -9,9 +9,15 @@ FPSCameraNode::FPSCameraNode()
     : CameraNodeBase() {
     name = "FPS Camera";
     cameraType = primitives::CameraType::FPS;
-    // Initialize yaw/pitch from default position/target
-    initializeOrientationFromTarget();
-    // Save initial state for reset functionality
+    // Re-initialize controller with FPS type
+    controller.init(CameraType::FPS,
+        glm::vec3(0.0f, 0.0f, 5.0f),
+        glm::vec3(0.0f, 0.0f, 0.0f),
+        glm::vec3(0.0f, 1.0f, 0.0f),
+        0.0f, 0.0f, 5.0f,
+        5.0f, 0.005f, 0.5f,
+        45.0f, 0.1f, 1000.0f
+    );
     saveInitialState();
 }
 
@@ -19,9 +25,15 @@ FPSCameraNode::FPSCameraNode(int id)
     : CameraNodeBase(id) {
     name = "FPS Camera";
     cameraType = primitives::CameraType::FPS;
-    // Initialize yaw/pitch from default position/target
-    initializeOrientationFromTarget();
-    // Save initial state for reset functionality
+    // Re-initialize controller with FPS type
+    controller.init(CameraType::FPS,
+        glm::vec3(0.0f, 0.0f, 5.0f),
+        glm::vec3(0.0f, 0.0f, 0.0f),
+        glm::vec3(0.0f, 1.0f, 0.0f),
+        0.0f, 0.0f, 5.0f,
+        5.0f, 0.005f, 0.5f,
+        45.0f, 0.1f, 1000.0f
+    );
     saveInitialState();
 }
 
@@ -31,12 +43,12 @@ void FPSCameraNode::createPrimitives(primitives::Store& store) {
     // Call base class to create UBO and Camera primitive
     CameraNodeBase::createPrimitives(store);
 
-    // Copy FPS-specific parameters for code generation
+    // Copy FPS-specific parameters for code generation (from controller)
     if (cameraPrimitive) {
-        cameraPrimitive->yaw = yaw;
-        cameraPrimitive->pitch = pitch;
-        cameraPrimitive->moveSpeed = moveSpeed;
-        cameraPrimitive->rotateSpeed = rotateSpeed;
+        cameraPrimitive->yaw = controller.yaw;
+        cameraPrimitive->pitch = controller.pitch;
+        cameraPrimitive->moveSpeed = controller.moveSpeed;
+        cameraPrimitive->rotateSpeed = controller.rotateSpeed;
     }
 }
 
@@ -53,11 +65,11 @@ nlohmann::json FPSCameraNode::toJson() const {
     nlohmann::json j = CameraNodeBase::toJson();
     j["type"] = "fps_camera";
 
-    // Add FPS-specific parameters
-    j["yaw"] = yaw;
-    j["pitch"] = pitch;
-    j["moveSpeed"] = moveSpeed;
-    j["rotateSpeed"] = rotateSpeed;
+    // Add FPS-specific parameters (from controller)
+    j["yaw"] = controller.yaw;
+    j["pitch"] = controller.pitch;
+    j["moveSpeed"] = controller.moveSpeed;
+    j["rotateSpeed"] = controller.rotateSpeed;
 
     return j;
 }
@@ -66,148 +78,67 @@ void FPSCameraNode::fromJson(const nlohmann::json& j) {
     // Call base class first
     CameraNodeBase::fromJson(j);
 
-    // Restore FPS-specific parameters
-    yaw = j.value("yaw", 0.0f);
-    pitch = j.value("pitch", 0.0f);
-    moveSpeed = j.value("moveSpeed", 5.0f);
-    rotateSpeed = j.value("rotateSpeed", 0.005f);
+    // Restore FPS-specific parameters (to controller)
+    controller.yaw = j.value("yaw", 0.0f);
+    controller.pitch = j.value("pitch", 0.0f);
+    controller.moveSpeed = j.value("moveSpeed", 5.0f);
+    controller.rotateSpeed = j.value("rotateSpeed", 0.005f);
+
+    // Make sure controller type is set correctly
+    controller.type = CameraType::FPS;
 
     updateMatrices();
-}
-
-void FPSCameraNode::processKeyboard(
-    float deltaTime,
-    bool forward,
-    bool backward,
-    bool left,
-    bool right,
-    bool upKey,
-    bool downKey
-) {
-    // Calculate camera direction vectors
-    glm::vec3 front = glm::normalize(target - position);
-    glm::vec3 right_dir = glm::normalize(glm::cross(front, up));
-
-    float velocity = moveSpeed * deltaTime;
-
-    // Move camera position directly (FPS style)
-    if (forward) {
-        position += front * velocity;
-        target += front * velocity;
-    }
-    if (backward) {
-        position -= front * velocity;
-        target -= front * velocity;
-    }
-    if (left) {
-        position -= right_dir * velocity;
-        target -= right_dir * velocity;
-    }
-    if (right) {
-        position += right_dir * velocity;
-        target += right_dir * velocity;
-    }
-    if (upKey) {
-        position += up * velocity;
-        target += up * velocity;
-    }
-    if (downKey) {
-        position -= up * velocity;
-        target -= up * velocity;
-    }
-
-    updateMatrices();
-}
-
-void FPSCameraNode::processMouseDrag(float deltaX, float deltaY) {
-    // Rotate yaw and pitch
-    yaw -= deltaX * rotateSpeed;
-    pitch -= deltaY * rotateSpeed;
-
-    // Clamp pitch to avoid flipping
-    const float maxPitch = glm::radians(89.0f);
-    pitch = glm::clamp(pitch, -maxPitch, maxPitch);
-
-    updateTargetFromOrientation();
-    updateMatrices();
-}
-
-void FPSCameraNode::updateTargetFromOrientation() {
-    // Calculate front direction from yaw/pitch
-    glm::vec3 front;
-    front.x = cos(pitch) * sin(yaw);
-    front.y = sin(pitch);
-    front.z = cos(pitch) * cos(yaw);
-    front = glm::normalize(front);
-
-    // Target is in front of the camera position (fixed distance)
-    target = position + front * 5.0f;
-}
-
-void FPSCameraNode::initializeOrientationFromTarget() {
-    // Calculate yaw/pitch from current position and target
-    glm::vec3 diff = target - position;
-    float length = glm::length(diff);
-
-    // Guard against zero-length direction (position == target)
-    if (length < 0.0001f) {
-        // Default to looking along -Z axis
-        yaw = glm::pi<float>();
-        pitch = 0.0f;
-        return;
-    }
-
-    glm::vec3 direction = diff / length;
-    yaw = atan2(direction.x, direction.z);
-    pitch = asin(glm::clamp(direction.y, -1.0f, 1.0f));
 }
 
 void FPSCameraNode::saveInitialState() {
     CameraNodeBase::saveInitialState();
-    initialYaw = yaw;
-    initialPitch = pitch;
+    initialYaw = controller.yaw;
+    initialPitch = controller.pitch;
 }
 
 void FPSCameraNode::resetToInitialState() {
     if (!initialStateSaved) return;
     CameraNodeBase::resetToInitialState();
-    yaw = initialYaw;
-    pitch = initialPitch;
+    controller.yaw = initialYaw;
+    controller.pitch = initialPitch;
+    // Let the controller recompute target from orientation
+    controller.processMouseDrag(0.0f, 0.0f);
     updateMatrices();
 }
 
 void FPSCameraNode::applyGLTFCamera(const GLTFCamera& gltfCamera) {
-    // Apply projection settings
+    // Apply projection settings to controller
     if (gltfCamera.isPerspective) {
-        fov = gltfCamera.fov;
+        controller.fov = gltfCamera.fov;
         if (gltfCamera.aspectRatio > 0.0f) {
-            aspectRatio = gltfCamera.aspectRatio;
+            controller.aspectRatio = gltfCamera.aspectRatio;
         }
     }
-    nearPlane = gltfCamera.nearPlane;
-    farPlane = gltfCamera.farPlane;
+    controller.nearPlane = gltfCamera.nearPlane;
+    controller.farPlane = gltfCamera.farPlane;
 
     // Apply position from GLTF transform
-    position = gltfCamera.position;
+    controller.position = gltfCamera.position;
 
     // Extract forward direction from transform matrix
     // GLTF cameras look down -Z in their local space
     glm::vec3 forward = -glm::normalize(glm::vec3(gltfCamera.transform[2]));
-    target = position + forward * 5.0f;
+    controller.target = controller.position + forward * 5.0f;
 
     // Extract up vector from transform
-    up = glm::normalize(glm::vec3(gltfCamera.transform[1]));
+    controller.up = glm::normalize(glm::vec3(gltfCamera.transform[1]));
 
     // Calculate yaw/pitch from direction
-    yaw = atan2(forward.x, forward.z);
-    pitch = asin(forward.y);
+    controller.yaw = atan2(forward.x, forward.z);
+    controller.pitch = asin(forward.y);
 
     updateMatrices();
 
     Log::debug(
         "FPSCameraNode",
         "Applied GLTF camera '{}' - FOV: {}, Pos: ({}, {}, {})",
-        gltfCamera.name, fov, position.x, position.y, position.z
+        gltfCamera.name, controller.fov, controller.position.x,
+        controller.position.y, controller.position.z
     );
 
     // Save as new initial state for reset

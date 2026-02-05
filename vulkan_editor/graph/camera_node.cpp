@@ -17,12 +17,30 @@ constexpr float PADDING_X = 10.0f;
 CameraNodeBase::CameraNodeBase()
     : Node() {
     name = "Camera";
+    // Initialize controller with default Fixed camera type
+    controller.init(CameraType::Fixed,
+        glm::vec3(0.0f, 0.0f, 5.0f),  // position
+        glm::vec3(0.0f, 0.0f, 0.0f),  // target
+        glm::vec3(0.0f, 1.0f, 0.0f),  // up
+        0.0f, 0.0f, 5.0f,              // yaw, pitch, distance
+        5.0f, 0.005f, 0.5f,            // moveSpeed, rotateSpeed, zoomSpeed
+        45.0f, 0.1f, 1000.0f           // fov, near, far
+    );
     createDefaultPins();
 }
 
 CameraNodeBase::CameraNodeBase(int id)
     : Node(id) {
     name = "Camera";
+    // Initialize controller with default Fixed camera type
+    controller.init(CameraType::Fixed,
+        glm::vec3(0.0f, 0.0f, 5.0f),
+        glm::vec3(0.0f, 0.0f, 0.0f),
+        glm::vec3(0.0f, 1.0f, 0.0f),
+        0.0f, 0.0f, 5.0f,
+        5.0f, 0.005f, 0.5f,
+        45.0f, 0.1f, 1000.0f
+    );
     createDefaultPins();
 }
 
@@ -35,21 +53,31 @@ void CameraNodeBase::createDefaultPins() {
 }
 
 void CameraNodeBase::updateMatrices() {
-    // View matrix (LookAt)
-    cameraData.view = glm::lookAt(position, target, up);
+    // Use library's CameraController to compute matrices
+    cameraData = controller.getCameraData();
+}
 
-    // Projection matrix (Perspective)
-    cameraData.proj = glm::perspective(
-        glm::radians(fov), aspectRatio, nearPlane, farPlane
-    );
+void CameraNodeBase::processKeyboard(
+    float deltaTime,
+    bool forward, bool backward,
+    bool left, bool right,
+    bool upKey, bool downKey
+) {
+    // Delegate to library's CameraController
+    controller.processKeyboard(deltaTime, forward, backward, left, right, upKey, downKey);
+    updateMatrices();
+}
 
-    // Flip Y for Vulkan
-    cameraData.proj[1][1] *= -1;
+void CameraNodeBase::processMouseDrag(float deltaX, float deltaY) {
+    // Delegate to library's CameraController
+    controller.processMouseDrag(deltaX, deltaY);
+    updateMatrices();
+}
 
-    // Inverse view
-    cameraData.invView = glm::inverse(cameraData.view);
-
-    // Note: UBO update is handled by Camera::recordCommands() for non-fixed cameras
+void CameraNodeBase::processScroll(float delta) {
+    // Delegate to library's CameraController
+    controller.processScroll(delta);
+    updateMatrices();
 }
 
 void CameraNodeBase::clearPrimitives() {
@@ -73,7 +101,7 @@ void CameraNodeBase::createPrimitives(primitives::Store& store) {
     cameraUbo->dataType = primitives::UniformDataType::Camera;
     cameraUbo->data = std::span<uint8_t>(
         reinterpret_cast<uint8_t*>(&cameraData),
-        sizeof(primitives::CameraData)
+        sizeof(CameraData)
     );
     cameraUbo->extraData = &cameraType;
 
@@ -88,13 +116,13 @@ void CameraNodeBase::createPrimitives(primitives::Store& store) {
     cameraPrimitive->cameraType = cameraType;
     cameraPrimitive->ubo = hUbo;
 
-    // Copy camera parameters for code generation
-    cameraPrimitive->position = position;
-    cameraPrimitive->target = target;
-    cameraPrimitive->up = up;
-    cameraPrimitive->fov = fov;
-    cameraPrimitive->nearPlane = nearPlane;
-    cameraPrimitive->farPlane = farPlane;
+    // Copy camera parameters for code generation (from controller)
+    cameraPrimitive->position = controller.position;
+    cameraPrimitive->target = controller.target;
+    cameraPrimitive->up = controller.up;
+    cameraPrimitive->fov = controller.fov;
+    cameraPrimitive->nearPlane = controller.nearPlane;
+    cameraPrimitive->farPlane = controller.farPlane;
 
     // Create array with single Camera for descriptor set binding
     cameraUboArray = store.newArray();
@@ -129,16 +157,16 @@ nlohmann::json CameraNodeBase::toJson() const {
     j["name"] = name;
     j["position"] = {Node::position.x, Node::position.y}; // UI position
 
-    // Camera base parameters
-    j["fov"] = fov;
-    j["nearPlane"] = nearPlane;
-    j["farPlane"] = farPlane;
-    j["aspectRatio"] = aspectRatio;
+    // Camera base parameters (from controller)
+    j["fov"] = controller.fov;
+    j["nearPlane"] = controller.nearPlane;
+    j["farPlane"] = controller.farPlane;
+    j["aspectRatio"] = controller.aspectRatio;
 
-    // Camera 3D position/orientation
-    j["cameraPosition"] = {position.x, position.y, position.z};
-    j["target"] = {target.x, target.y, target.z};
-    j["up"] = {up.x, up.y, up.z};
+    // Camera 3D position/orientation (from controller)
+    j["cameraPosition"] = {controller.position.x, controller.position.y, controller.position.z};
+    j["target"] = {controller.target.x, controller.target.y, controller.target.z};
+    j["up"] = {controller.up.x, controller.up.y, controller.up.z};
 
     // Pin info
     j["outputPins"] = {
@@ -160,29 +188,28 @@ void CameraNodeBase::fromJson(const nlohmann::json& j) {
         );
     }
 
-    // Camera base parameters
-    fov = j.value("fov", 45.0f);
-    nearPlane = j.value("nearPlane", 0.1f);
-    farPlane = j.value("farPlane", 1000.0f);
-    aspectRatio = j.value("aspectRatio", 16.0f / 9.0f);
+    // Camera base parameters (to controller)
+    controller.fov = j.value("fov", 45.0f);
+    controller.nearPlane = j.value("nearPlane", 0.1f);
+    controller.farPlane = j.value("farPlane", 1000.0f);
+    controller.aspectRatio = j.value("aspectRatio", 16.0f / 9.0f);
 
-    // Camera 3D position/orientation
-    if (j.contains("cameraPosition") &&
-        j["cameraPosition"].is_array()) {
-        position = glm::vec3(
+    // Camera 3D position/orientation (to controller)
+    if (j.contains("cameraPosition") && j["cameraPosition"].is_array()) {
+        controller.position = glm::vec3(
             j["cameraPosition"][0].get<float>(),
             j["cameraPosition"][1].get<float>(),
             j["cameraPosition"][2].get<float>()
         );
     }
     if (j.contains("target") && j["target"].is_array()) {
-        target = glm::vec3(
+        controller.target = glm::vec3(
             j["target"][0].get<float>(), j["target"][1].get<float>(),
             j["target"][2].get<float>()
         );
     }
     if (j.contains("up") && j["up"].is_array()) {
-        up = glm::vec3(
+        controller.up = glm::vec3(
             j["up"][0].get<float>(), j["up"][1].get<float>(),
             j["up"][2].get<float>()
         );
@@ -262,6 +289,21 @@ void CameraNodeBase::renderCameraNode(
     ed::PopStyleColor();
 }
 
+void CameraNodeBase::saveInitialState() {
+    initialPosition = controller.position;
+    initialTarget = controller.target;
+    initialUp = controller.up;
+    initialStateSaved = true;
+}
+
+void CameraNodeBase::resetToInitialState() {
+    if (!initialStateSaved) return;
+    controller.position = initialPosition;
+    controller.target = initialTarget;
+    controller.up = initialUp;
+    updateMatrices();
+}
+
 // ============================================================================
 // OrbitalCameraNode Implementation
 // ============================================================================
@@ -270,7 +312,15 @@ OrbitalCameraNode::OrbitalCameraNode()
     : CameraNodeBase() {
     name = "Orbital Camera";
     cameraType = primitives::CameraType::Orbital;
-    // Save initial state for reset functionality
+    // Re-initialize controller with Orbital type
+    controller.init(CameraType::Orbital,
+        glm::vec3(0.0f, 0.0f, 5.0f),
+        glm::vec3(0.0f, 0.0f, 0.0f),
+        glm::vec3(0.0f, 1.0f, 0.0f),
+        0.0f, 0.0f, 5.0f,
+        5.0f, 0.005f, 0.5f,
+        45.0f, 0.1f, 1000.0f
+    );
     saveInitialState();
 }
 
@@ -278,7 +328,15 @@ OrbitalCameraNode::OrbitalCameraNode(int id)
     : CameraNodeBase(id) {
     name = "Orbital Camera";
     cameraType = primitives::CameraType::Orbital;
-    // Save initial state for reset functionality
+    // Re-initialize controller with Orbital type
+    controller.init(CameraType::Orbital,
+        glm::vec3(0.0f, 0.0f, 5.0f),
+        glm::vec3(0.0f, 0.0f, 0.0f),
+        glm::vec3(0.0f, 1.0f, 0.0f),
+        0.0f, 0.0f, 5.0f,
+        5.0f, 0.005f, 0.5f,
+        45.0f, 0.1f, 1000.0f
+    );
     saveInitialState();
 }
 
@@ -288,14 +346,14 @@ void OrbitalCameraNode::createPrimitives(primitives::Store& store) {
     // Call base class to create UBO and Camera primitive
     CameraNodeBase::createPrimitives(store);
 
-    // Copy Orbital-specific parameters for code generation
+    // Copy Orbital-specific parameters for code generation (from controller)
     if (cameraPrimitive) {
-        cameraPrimitive->distance = distance;
-        cameraPrimitive->yaw = yaw;
-        cameraPrimitive->pitch = pitch;
-        cameraPrimitive->moveSpeed = moveSpeed;
-        cameraPrimitive->rotateSpeed = rotateSpeed;
-        cameraPrimitive->zoomSpeed = zoomSpeed;
+        cameraPrimitive->distance = controller.distance;
+        cameraPrimitive->yaw = controller.yaw;
+        cameraPrimitive->pitch = controller.pitch;
+        cameraPrimitive->moveSpeed = controller.moveSpeed;
+        cameraPrimitive->rotateSpeed = controller.rotateSpeed;
+        cameraPrimitive->zoomSpeed = controller.zoomSpeed;
     }
 }
 
@@ -312,13 +370,13 @@ nlohmann::json OrbitalCameraNode::toJson() const {
     nlohmann::json j = CameraNodeBase::toJson();
     j["type"] = "orbital_camera";
 
-    // Add orbital-specific parameters
-    j["distance"] = distance;
-    j["yaw"] = yaw;
-    j["pitch"] = pitch;
-    j["moveSpeed"] = moveSpeed;
-    j["rotateSpeed"] = rotateSpeed;
-    j["zoomSpeed"] = zoomSpeed;
+    // Add orbital-specific parameters (from controller)
+    j["distance"] = controller.distance;
+    j["yaw"] = controller.yaw;
+    j["pitch"] = controller.pitch;
+    j["moveSpeed"] = controller.moveSpeed;
+    j["rotateSpeed"] = controller.rotateSpeed;
+    j["zoomSpeed"] = controller.zoomSpeed;
 
     return j;
 }
@@ -327,131 +385,48 @@ void OrbitalCameraNode::fromJson(const nlohmann::json& j) {
     // Call base class first
     CameraNodeBase::fromJson(j);
 
-    // Restore orbital-specific parameters
-    distance = j.value("distance", 5.0f);
-    yaw = j.value("yaw", 0.0f);
-    pitch = j.value("pitch", 0.0f);
-    moveSpeed = j.value("moveSpeed", 5.0f);
-    rotateSpeed = j.value("rotateSpeed", 0.005f);
-    zoomSpeed = j.value("zoomSpeed", 0.5f);
+    // Restore orbital-specific parameters (to controller)
+    controller.distance = j.value("distance", 5.0f);
+    controller.yaw = j.value("yaw", 0.0f);
+    controller.pitch = j.value("pitch", 0.0f);
+    controller.moveSpeed = j.value("moveSpeed", 5.0f);
+    controller.rotateSpeed = j.value("rotateSpeed", 0.005f);
+    controller.zoomSpeed = j.value("zoomSpeed", 0.5f);
 
-    updateMatrices();
-}
+    // Make sure controller type is set correctly
+    controller.type = CameraType::Orbital;
 
-void OrbitalCameraNode::processKeyboard(
-    float deltaTime,
-    bool forward,
-    bool backward,
-    bool left,
-    bool right,
-    bool upKey,
-    bool downKey
-) {
-    // Calculate camera direction vectors
-    glm::vec3 front = glm::normalize(target - position);
-    glm::vec3 right_dir = glm::normalize(glm::cross(front, up));
-
-    float velocity = moveSpeed * deltaTime;
-
-    // Move target (camera follows in orbit mode)
-    if (forward) {
-        target += front * velocity;
-    }
-    if (backward) {
-        target -= front * velocity;
-    }
-    if (left) {
-        target -= right_dir * velocity;
-    }
-    if (right) {
-        target += right_dir * velocity;
-    }
-    if (upKey) {
-        target += up * velocity;
-    }
-    if (downKey) {
-        target -= up * velocity;
-    }
-
-    // Update position based on orbit
-    updatePositionFromOrbit();
-    updateMatrices();
-}
-
-void OrbitalCameraNode::processMouseDrag(
-    float deltaX,
-    float deltaY
-) {
-    yaw -= deltaX * rotateSpeed;
-    pitch -= deltaY * rotateSpeed;
-
-    // Clamp pitch to avoid flipping
-    const float maxPitch = glm::radians(89.0f);
-    pitch = glm::clamp(pitch, -maxPitch, maxPitch);
-
-    updatePositionFromOrbit();
-    updateMatrices();
-}
-
-void OrbitalCameraNode::processScroll(float delta) {
-    distance -= delta * zoomSpeed;
-    distance = glm::clamp(distance, 0.5f, 100.0f);
-
-    updatePositionFromOrbit();
-    updateMatrices();
-}
-
-void OrbitalCameraNode::updatePositionFromOrbit() {
-    // Calculate position from spherical coordinates around target
-    position.x = target.x + distance * cos(pitch) * sin(yaw);
-    position.y = target.y + distance * sin(pitch);
-    position.z = target.z + distance * cos(pitch) * cos(yaw);
-}
-
-void CameraNodeBase::saveInitialState() {
-    initialPosition = position;
-    initialTarget = target;
-    initialUp = up;
-    initialStateSaved = true;
-}
-
-void CameraNodeBase::resetToInitialState() {
-    if (!initialStateSaved) return;
-    position = initialPosition;
-    target = initialTarget;
-    up = initialUp;
     updateMatrices();
 }
 
 void OrbitalCameraNode::applyGLTFCamera(const GLTFCamera& gltfCamera) {
-    // Apply projection settings
+    // Apply projection settings to controller
     if (gltfCamera.isPerspective) {
-        fov = gltfCamera.fov;
+        controller.fov = gltfCamera.fov;
         if (gltfCamera.aspectRatio > 0.0f) {
-            aspectRatio = gltfCamera.aspectRatio;
+            controller.aspectRatio = gltfCamera.aspectRatio;
         }
     }
-    nearPlane = gltfCamera.nearPlane;
-    farPlane = gltfCamera.farPlane;
+    controller.nearPlane = gltfCamera.nearPlane;
+    controller.farPlane = gltfCamera.farPlane;
 
     // Apply position from GLTF transform
-    position = gltfCamera.position;
+    controller.position = gltfCamera.position;
 
     // Extract forward direction from transform matrix
     // GLTF cameras look down -Z in their local space
-    glm::vec3 forward =
-        -glm::normalize(glm::vec3(gltfCamera.transform[2]));
-    target = position + forward * distance;
+    glm::vec3 forward = -glm::normalize(glm::vec3(gltfCamera.transform[2]));
+    controller.target = controller.position + forward * controller.distance;
 
     // Extract up vector from transform
-    up = glm::normalize(glm::vec3(gltfCamera.transform[1]));
+    controller.up = glm::normalize(glm::vec3(gltfCamera.transform[1]));
 
     // Recalculate orbit parameters from position
-    glm::vec3 offset = position - target;
-    distance = glm::length(offset);
-    if (distance > 0.001f) {
-        pitch = asin(offset.y / distance);
-        yaw = atan2(offset.x, offset.z);
+    glm::vec3 offset = controller.position - controller.target;
+    controller.distance = glm::length(offset);
+    if (controller.distance > 0.001f) {
+        controller.pitch = asin(offset.y / controller.distance);
+        controller.yaw = atan2(offset.x, offset.z);
     }
 
     updateMatrices();
@@ -459,7 +434,8 @@ void OrbitalCameraNode::applyGLTFCamera(const GLTFCamera& gltfCamera) {
     Log::debug(
         "OrbitalCameraNode",
         "Applied GLTF camera '{}' - FOV: {}, Pos: ({}, {}, {})",
-        gltfCamera.name, fov, position.x, position.y, position.z
+        gltfCamera.name, controller.fov, controller.position.x,
+        controller.position.y, controller.position.z
     );
 
     // Save as new initial state for reset
@@ -468,17 +444,18 @@ void OrbitalCameraNode::applyGLTFCamera(const GLTFCamera& gltfCamera) {
 
 void OrbitalCameraNode::saveInitialState() {
     CameraNodeBase::saveInitialState();
-    initialDistance = distance;
-    initialYaw = yaw;
-    initialPitch = pitch;
+    initialDistance = controller.distance;
+    initialYaw = controller.yaw;
+    initialPitch = controller.pitch;
 }
 
 void OrbitalCameraNode::resetToInitialState() {
     if (!initialStateSaved) return;
     CameraNodeBase::resetToInitialState();
-    distance = initialDistance;
-    yaw = initialYaw;
-    pitch = initialPitch;
-    updatePositionFromOrbit();
+    controller.distance = initialDistance;
+    controller.yaw = initialYaw;
+    controller.pitch = initialPitch;
+    // Let the controller update position from orbit params
+    controller.processScroll(0.0f);  // Triggers updatePositionFromOrbit internally
     updateMatrices();
 }

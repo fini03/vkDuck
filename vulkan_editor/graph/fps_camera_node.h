@@ -3,6 +3,7 @@
 
 // ============================================================================
 // FPSCameraNode - First-person fly camera (like Blender fly mode)
+// Uses CameraController from vkDuck library for camera math
 // ============================================================================
 class FPSCameraNode : public CameraNodeBase {
 public:
@@ -22,25 +23,15 @@ public:
     // Override to copy FPS-specific parameters
     void createPrimitives(primitives::Store& store) override;
 
-    // FPS camera uses yaw/pitch for orientation
-    float yaw{0.0f};   // Horizontal angle (radians)
-    float pitch{0.0f}; // Vertical angle (radians)
-
-    // Control speeds
-    float moveSpeed{5.0f};     // Movement speed
-    float rotateSpeed{0.005f}; // Mouse rotation sensitivity
-
-    // Input handling - override base class virtuals
-    void processKeyboard(
-        float deltaTime,
-        bool forward,
-        bool backward,
-        bool left,
-        bool right,
-        bool up,
-        bool down
-    ) override;
-    void processMouseDrag(float deltaX, float deltaY) override;
+    // Convenience accessors for FPS-specific params (delegate to controller)
+    float getYaw() const { return controller.yaw; }
+    void setYaw(float y) { controller.yaw = y; }
+    float getPitch() const { return controller.pitch; }
+    void setPitch(float p) { controller.pitch = p; }
+    float getMoveSpeed() const { return controller.moveSpeed; }
+    void setMoveSpeed(float s) { controller.moveSpeed = s; }
+    float getRotateSpeed() const { return controller.rotateSpeed; }
+    void setRotateSpeed(float s) { controller.rotateSpeed = s; }
 
     // Apply settings from a GLTF camera
     void applyGLTFCamera(const GLTFCamera& gltfCamera);
@@ -55,9 +46,6 @@ public:
     }
 
 private:
-    void updateTargetFromOrientation();
-    void initializeOrientationFromTarget();
-
     // Initial FPS parameters for reset
     float initialYaw{0.0f};
     float initialPitch{0.0f};

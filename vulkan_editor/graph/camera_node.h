@@ -6,6 +6,9 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+// Use shared camera controller from vkDuck library
+#include <vkDuck/camera_controller.h>
+
 using namespace ShaderTypes;
 
 struct GLTFCamera;
@@ -14,8 +17,8 @@ struct GLTFCamera;
  * @class CameraNodeBase
  * @brief Abstract base class for camera nodes providing view/projection matrices.
  *
- * Manages projection parameters (FOV, near/far planes) and computes view/projection
- * matrices for shader binding. Derived classes implement specific camera behaviors
+ * Uses the shared CameraController from vkDuck library for camera math and input
+ * processing. Derived classes configure the controller for specific behaviors
  * (orbital, FPS, fixed).
  */
 class CameraNodeBase : public Node, public ISerializable {
@@ -36,25 +39,25 @@ public:
     nlohmann::json toJson() const override;
     void fromJson(const nlohmann::json& j) override;
 
-    float fov{45.0f};
-    float nearPlane{0.1f};
-    float farPlane{1000.0f};
-    float aspectRatio{16.0f / 9.0f};
+    // Camera controller from vkDuck library (handles all camera math)
+    CameraController controller;
 
-    glm::vec3 position{0.0f, 0.0f, 5.0f};
-    glm::vec3 target{0.0f, 0.0f, 0.0f};
-    glm::vec3 up{0.0f, 1.0f, 0.0f};
+    // Camera data for GPU (updated from controller)
+    CameraData cameraData{};
 
-    primitives::CameraData cameraData{};
+    // Editor camera type (for primitive creation)
     primitives::CameraType cameraType{primitives::CameraType::Fixed};
 
+    // Update matrices from controller state
     virtual void updateMatrices();
+
+    // Input processing - delegates to controller
     virtual void processKeyboard(
         float deltaTime, bool forward, bool backward,
-        bool left, bool right, bool up, bool down
-    ) {}
-    virtual void processMouseDrag(float deltaX, float deltaY) {}
-    virtual void processScroll(float delta) {}
+        bool left, bool right, bool upKey, bool downKey
+    );
+    virtual void processMouseDrag(float deltaX, float deltaY);
+    virtual void processScroll(float delta);
 
     virtual void saveInitialState();
     virtual void resetToInitialState();
@@ -63,9 +66,26 @@ public:
         return primitives::CameraType::Fixed;
     }
 
+    // Convenience accessors (delegate to controller)
+    float getFov() const { return controller.fov; }
+    void setFov(float f) { controller.fov = f; }
+    float getNearPlane() const { return controller.nearPlane; }
+    void setNearPlane(float n) { controller.nearPlane = n; }
+    float getFarPlane() const { return controller.farPlane; }
+    void setFarPlane(float f) { controller.farPlane = f; }
+    float getAspectRatio() const { return controller.aspectRatio; }
+    void setAspectRatio(float a) { controller.aspectRatio = a; }
+    glm::vec3 getPosition() const { return controller.position; }
+    void setPosition(const glm::vec3& p) { controller.position = p; }
+    glm::vec3 getTarget() const { return controller.target; }
+    void setTarget(const glm::vec3& t) { controller.target = t; }
+    glm::vec3 getUp() const { return controller.up; }
+    void setUp(const glm::vec3& u) { controller.up = u; }
+
     Pin cameraPin;
 
 protected:
+    // Initial state for reset functionality
     glm::vec3 initialPosition{0.0f, 0.0f, 5.0f};
     glm::vec3 initialTarget{0.0f, 0.0f, 0.0f};
     glm::vec3 initialUp{0.0f, 1.0f, 0.0f};
@@ -102,20 +122,20 @@ public:
     void fromJson(const nlohmann::json& j) override;
     void createPrimitives(primitives::Store& store) override;
 
-    float distance{5.0f};
-    float yaw{0.0f};
-    float pitch{0.0f};
-    float moveSpeed{5.0f};
-    float rotateSpeed{0.005f};
-    float zoomSpeed{0.5f};
+    // Convenience accessors for orbital-specific params
+    float getDistance() const { return controller.distance; }
+    void setDistance(float d) { controller.distance = d; }
+    float getYaw() const { return controller.yaw; }
+    void setYaw(float y) { controller.yaw = y; }
+    float getPitch() const { return controller.pitch; }
+    void setPitch(float p) { controller.pitch = p; }
+    float getMoveSpeed() const { return controller.moveSpeed; }
+    void setMoveSpeed(float s) { controller.moveSpeed = s; }
+    float getRotateSpeed() const { return controller.rotateSpeed; }
+    void setRotateSpeed(float s) { controller.rotateSpeed = s; }
+    float getZoomSpeed() const { return controller.zoomSpeed; }
+    void setZoomSpeed(float s) { controller.zoomSpeed = s; }
 
-    void processKeyboard(
-        float deltaTime, bool forward, bool backward,
-        bool left, bool right, bool up, bool down
-    ) override;
-    void processMouseDrag(float deltaX, float deltaY) override;
-    void processScroll(float delta) override;
-    void updatePositionFromOrbit();
     void applyGLTFCamera(const GLTFCamera& gltfCamera);
     void saveInitialState() override;
     void resetToInitialState() override;

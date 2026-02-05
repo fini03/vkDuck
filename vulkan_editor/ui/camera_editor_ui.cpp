@@ -122,24 +122,24 @@ void CameraEditorUI::DrawOrbitalCamera(
     // Transform (similar to Fixed Camera layout)
     if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
         changed |=
-            ImGui::DragFloat3("Position", &camera->position.x, 0.1f);
+            ImGui::DragFloat3("Position", &camera->controller.position.x, 0.1f);
         changed |= ImGui::DragFloat3(
-            "Look At Target", &camera->target.x, 0.1f
+            "Look At Target", &camera->controller.target.x, 0.1f
         );
-        changed |= ImGui::DragFloat3("Up Vector", &camera->up.x, 0.01f);
+        changed |= ImGui::DragFloat3("Up Vector", &camera->controller.up.x, 0.01f);
 
         if (ImGui::Button("Normalize Up")) {
-            camera->up = glm::normalize(camera->up);
+            camera->controller.up = glm::normalize(camera->controller.up);
             changed = true;
         }
 
         // Recalculate orbit parameters if position/target changed
         if (changed) {
-            glm::vec3 offset = camera->position - camera->target;
-            camera->distance = glm::length(offset);
-            if (camera->distance > 0.001f) {
-                camera->pitch = asin(offset.y / camera->distance);
-                camera->yaw = atan2(offset.x, offset.z);
+            glm::vec3 offset = camera->controller.position - camera->controller.target;
+            camera->controller.distance = glm::length(offset);
+            if (camera->controller.distance > 0.001f) {
+                camera->controller.pitch = asin(offset.y / camera->controller.distance);
+                camera->controller.yaw = atan2(offset.x, offset.z);
             }
         }
     }
@@ -154,11 +154,11 @@ void CameraEditorUI::DrawOrbitalCamera(
 
     // Control Speeds (at the end as requested)
     if (ImGui::CollapsingHeader("Control Speeds")) {
-        ImGui::SliderFloat("Move Speed", &camera->moveSpeed, 0.1f, 20.0f);
+        ImGui::SliderFloat("Move Speed", &camera->controller.moveSpeed, 0.1f, 20.0f);
         ImGui::SliderFloat(
-            "Rotate Speed", &camera->rotateSpeed, 0.001f, 0.02f
+            "Rotate Speed", &camera->controller.rotateSpeed, 0.001f, 0.02f
         );
-        ImGui::SliderFloat("Zoom Speed", &camera->zoomSpeed, 0.1f, 2.0f);
+        ImGui::SliderFloat("Zoom Speed", &camera->controller.zoomSpeed, 0.1f, 2.0f);
     }
 
     // Live Controls Info
@@ -277,23 +277,23 @@ void CameraEditorUI::DrawFPSCamera(
     // Transform
     if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
         changed |=
-            ImGui::DragFloat3("Position", &camera->position.x, 0.1f);
+            ImGui::DragFloat3("Position", &camera->controller.position.x, 0.1f);
         changed |= ImGui::DragFloat3(
-            "Look At Target", &camera->target.x, 0.1f
+            "Look At Target", &camera->controller.target.x, 0.1f
         );
-        changed |= ImGui::DragFloat3("Up Vector", &camera->up.x, 0.01f);
+        changed |= ImGui::DragFloat3("Up Vector", &camera->controller.up.x, 0.01f);
 
         if (ImGui::Button("Normalize Up")) {
-            camera->up = glm::normalize(camera->up);
+            camera->controller.up = glm::normalize(camera->controller.up);
             changed = true;
         }
 
         // Recalculate yaw/pitch if position/target changed
         if (changed) {
             glm::vec3 direction =
-                glm::normalize(camera->target - camera->position);
-            camera->yaw = atan2(direction.x, direction.z);
-            camera->pitch = asin(direction.y);
+                glm::normalize(camera->controller.target - camera->controller.position);
+            camera->controller.yaw = atan2(direction.x, direction.z);
+            camera->controller.pitch = asin(direction.y);
         }
     }
 
@@ -307,9 +307,9 @@ void CameraEditorUI::DrawFPSCamera(
 
     // Control Speeds
     if (ImGui::CollapsingHeader("Control Speeds")) {
-        ImGui::SliderFloat("Move Speed", &camera->moveSpeed, 0.1f, 20.0f);
+        ImGui::SliderFloat("Move Speed", &camera->controller.moveSpeed, 0.1f, 20.0f);
         ImGui::SliderFloat(
-            "Rotate Speed", &camera->rotateSpeed, 0.001f, 0.02f
+            "Rotate Speed", &camera->controller.rotateSpeed, 0.001f, 0.02f
         );
     }
 
@@ -347,14 +347,14 @@ void CameraEditorUI::DrawFixedCamera(FixedCameraNode* camera) {
             "Transform", ImGuiTreeNodeFlags_DefaultOpen
         )) {
         changed |=
-            ImGui::DragFloat3("Position", &camera->position.x, 0.1f);
+            ImGui::DragFloat3("Position", &camera->controller.position.x, 0.1f);
         changed |= ImGui::DragFloat3(
-            "Look At Target", &camera->target.x, 0.1f
+            "Look At Target", &camera->controller.target.x, 0.1f
         );
-        changed |= ImGui::DragFloat3("Up Vector", &camera->up.x, 0.01f);
+        changed |= ImGui::DragFloat3("Up Vector", &camera->controller.up.x, 0.01f);
 
         if (ImGui::Button("Normalize Up")) {
-            camera->up = glm::normalize(camera->up);
+            camera->controller.up = glm::normalize(camera->controller.up);
             changed = true;
         }
     }
@@ -386,13 +386,13 @@ bool CameraEditorUI::DrawProjectionSettings(CameraNodeBase* camera) {
             "Projection", ImGuiTreeNodeFlags_DefaultOpen
         )) {
         changed |= ImGui::SliderFloat(
-            "FOV", &camera->fov, 1.0f, 120.0f, "%.1f"
+            "FOV", &camera->controller.fov, 1.0f, 120.0f, "%.1f"
         );
         changed |= ImGui::DragFloat(
-            "Near Plane", &camera->nearPlane, 0.01f, 0.001f, 100.0f
+            "Near Plane", &camera->controller.nearPlane, 0.01f, 0.001f, 100.0f
         );
         changed |= ImGui::DragFloat(
-            "Far Plane", &camera->farPlane, 1.0f, 1.0f, 10000.0f
+            "Far Plane", &camera->controller.farPlane, 1.0f, 1.0f, 10000.0f
         );
     }
 
@@ -401,12 +401,12 @@ bool CameraEditorUI::DrawProjectionSettings(CameraNodeBase* camera) {
 
 void CameraEditorUI::DrawDebugInfo(CameraNodeBase* camera) {
     ImGui::Text(
-        "Position: (%.2f, %.2f, %.2f)", camera->position.x,
-        camera->position.y, camera->position.z
+        "Position: (%.2f, %.2f, %.2f)", camera->controller.position.x,
+        camera->controller.position.y, camera->controller.position.z
     );
     ImGui::Text(
-        "Target: (%.2f, %.2f, %.2f)", camera->target.x,
-        camera->target.y, camera->target.z
+        "Target: (%.2f, %.2f, %.2f)", camera->controller.target.x,
+        camera->controller.target.y, camera->controller.target.z
     );
 
     ImGui::Separator();

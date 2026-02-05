@@ -58,9 +58,9 @@ bool DefaultRendererSetup::createForModel(
         // Set the node graph UI position
         static_cast<Node*>(cameraNode.get())->position = ImVec2(modelPos.x - 300, modelPos.y - 100);
         // Set camera world position (looking at origin from a distance)
-        cameraNode->CameraNodeBase::position = glm::vec3(0.0f, 2.0f, 5.0f);
-        cameraNode->target = glm::vec3(0.0f, 0.0f, 0.0f);
-        cameraNode->up = glm::vec3(0.0f, 1.0f, 0.0f);
+        cameraNode->setPosition(glm::vec3(0.0f, 2.0f, 5.0f));
+        cameraNode->setTarget(glm::vec3(0.0f, 0.0f, 0.0f));
+        cameraNode->setUp(glm::vec3(0.0f, 1.0f, 0.0f));
         cameraNode->updateMatrices();
         fixedCamPtr = cameraNode.get();
         cameraPinToConnect = fixedCamPtr->cameraPin.id;
