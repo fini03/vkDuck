@@ -10,8 +10,9 @@
 #include <thread>
 #include <vulkan/vk_enum_string_helper.h>
 
-// Use vkDuck's image loader
+// Use vkDuck's shared implementations
 #include <vkDuck/image_loader.h>
+#include <vkDuck/model_loader.h>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -21,16 +22,6 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/quaternion.hpp>
-
-// TinyGLTF implementation for editor's model loading
-// Note: vkDuck also has its own implementation for generated projects
-#define TINYGLTF_IMPLEMENTATION
-#define TINYGLTF_NO_STB_IMAGE
-#define TINYGLTF_NO_EXTERNAL_IMAGE
-#define TINYGLTF_NO_STB_IMAGE_WRITE
-#define TINYGLTF_NO_INCLUDE_STB
-#define TINYGLTF_NO_INCLUDE_STB_IMAGE_WRITE
-#include <tiny_gltf.h>
 
 #include "external/utilities/builders.h"
 #include "external/utilities/widgets.h"
@@ -62,55 +53,6 @@ const std::vector<const char*> ModelNode::topologyOptions =
     createEnumStringList(
         topologyOptionsEnum, string_VkPrimitiveTopology
     );
-
-// Texture path resolution for editor (uses simple search paths)
-static fs::path findTexturePath(
-    const fs::path& parentPath,
-    const fs::path& projectRoot,
-    std::string_view uri
-) {
-    auto texturePath = parentPath / uri;
-    if (fs::exists(texturePath))
-        return texturePath;
-
-    // Try sibling "images" folder
-    auto siblingImagesPath = parentPath.parent_path() / "images" / uri;
-    if (fs::exists(siblingImagesPath)) {
-        return siblingImagesPath;
-    }
-
-    if (projectRoot.empty()) {
-        return texturePath;
-    }
-
-    // Try data/images relative to project root
-    auto dataImagesPath = projectRoot / "data" / "images" / uri;
-    if (fs::exists(dataImagesPath)) {
-        return dataImagesPath;
-    }
-
-    return texturePath;
-}
-
-// Batch resolve texture paths
-static std::vector<fs::path> findTexturePathsBatch(
-    const fs::path& parentPath,
-    const fs::path& projectRoot,
-    const std::vector<std::pair<size_t, std::string>>& texturesToResolve,
-    size_t totalImages
-) {
-    std::vector<fs::path> resolvedPaths(totalImages);
-
-    if (texturesToResolve.empty()) {
-        return resolvedPaths;
-    }
-
-    for (const auto& [index, uri] : texturesToResolve) {
-        resolvedPaths[index] = findTexturePath(parentPath, projectRoot, uri);
-    }
-
-    return resolvedPaths;
-}
 
 // Parallel image loading result (uses vkDuck's imageLoad)
 struct DecodedImageResult {
@@ -352,159 +294,50 @@ void ModelNode::render(
     ed::PopStyleColor();
 }
 
-VkPrimitiveTopology ModelNode::gltfModeToVulkan(int mode) {
-    switch (mode) {
-    case 0: // POINTS
-        return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
-
-    case 1: // LINES
-        return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-
-    case 2: // LINE_LOOP (not supported)
-        // must be converted to LINE_STRIP + duplicated first vertex
-        return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
-
-    case 3: // LINE_STRIP
-        return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
-
-    case 4: // TRIANGLES
-        return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-    case 5: // TRIANGLE_STRIP
-        return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-
-    case 6: // TRIANGLE_FAN
-        return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
-
-    default:
-        // Spec says default is TRIANGLES
-        return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    }
-}
-
-glm::mat4 ModelNode::getNodeTransform(const tinygltf::Node& node) {
-    glm::mat4 transform(1.0f);
-    if (node.matrix.size() == 16) {
-        transform = glm::make_mat4(node.matrix.data()); //
-    } else {
-        if (node.translation.size() == 3) {
-            transform = glm::translate(
-                transform, glm::vec3(
-                               node.translation[0], node.translation[1],
-                               node.translation[2]
-                           )
-            ); //
-        }
-        if (node.rotation.size() == 4) {
-            glm::quat q(
-                node.rotation[3], node.rotation[0], node.rotation[1],
-                node.rotation[2]
-            );                              //
-            transform *= glm::mat4_cast(q); //
-        }
-        if (node.scale.size() == 3) {
-            transform = glm::scale(
-                transform,
-                glm::vec3(node.scale[0], node.scale[1], node.scale[2])
-            ); //
-        }
-    }
-    return transform;
-}
-
 void ModelNode::loadModel(
     const std::filesystem::path& path,
-    const std::filesystem::path& projectRoot
+    const std::filesystem::path& projRoot
 ) {
     auto totalStart = std::chrono::high_resolution_clock::now();
     Log::info("Model", "Loading model from: {}", path.string());
 
     // Clear existing data
-    geometries.clear();
     materials.clear();
     images.clear();
     modelData.clear();
     gltfCameras.clear();
     selectedCameraIndex = -1;
-    defaultTexture = {.path = projectRoot / "data/images/default.png"};
+    defaultTexture = {.path = projRoot / "data/images/default.png"};
 
-    tinygltf::Model model;
-    tinygltf::TinyGLTF loader;
-    std::string err, warn;
+    // Use vkDuck library's loadModel for all the heavy lifting
+    // (GLTF parsing, SIMD index conversion, camera extraction, texture path resolution)
+    ModelData libModelData = ::loadModel(path.string(), projRoot.string());
 
-    Log::debug("Model", "Parsing glTF file...");
-
-    bool ret;
-    if (path.extension() == ".glb")
-        ret = loader.LoadBinaryFromFile(
-            &model, &err, &warn, path.string()
-        );
-    else
-        ret = loader.LoadASCIIFromFile(
-            &model, &err, &warn, path.string()
-        );
-
-    if (!ret) {
-        Log::error("Model", "Failed to load gITF: {}", err);
+    if (libModelData.vertices.empty()) {
+        Log::error("Model", "Failed to load model or model is empty");
         return;
     }
 
-    int defaultScene = model.defaultScene > 0 ? model.defaultScene : 0;
-    const tinygltf::Scene& scene = model.scenes[defaultScene];
+    // Copy consolidated geometry data directly to modelData
+    modelData.vertices = std::move(libModelData.vertices);
+    modelData.indices = std::move(libModelData.indices);
 
-    // Pre-allocate geometry vector to avoid reallocations during loading
-    {
-        size_t estimatedGeometries = 0;
-        for (const auto& mesh : model.meshes) {
-            estimatedGeometries += mesh.primitives.size();
-        }
-        geometries.reserve(estimatedGeometries);
+    // Convert GeometryRange to EditorGeometryRange (add topology field)
+    VkPrimitiveTopology defaultTopology = topologyOptionsEnum[settings.topology];
+    modelData.ranges.reserve(libModelData.ranges.size());
+    for (const auto& range : libModelData.ranges) {
+        EditorGeometryRange editorRange;
+        editorRange.firstVertex = range.firstVertex;
+        editorRange.vertexCount = range.vertexCount;
+        editorRange.firstIndex = range.firstIndex;
+        editorRange.indexCount = range.indexCount;
+        editorRange.materialIndex = range.materialIndex;
+        editorRange.topology = defaultTopology;
+        modelData.ranges.push_back(editorRange);
     }
 
-    {
-        auto t1 = std::chrono::high_resolution_clock::now();
-        for (int nodeIndex : scene.nodes)
-            processNode(model, nodeIndex, glm::mat4(1.0f));
-        auto t2 = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double, std::milli> ms_double = t2 - t1;
-        Log::debug(
-            "Model", "Node processing took {}ms", ms_double.count()
-        );
-    }
-
-    // Parse cameras from GLTF
-    for (size_t i = 0; i < model.cameras.size(); ++i) {
-        const auto& gltfCam = model.cameras[i];
-        GLTFCamera cam;
-        cam.name = gltfCam.name.empty() ? "Camera " + std::to_string(i)
-                                        : gltfCam.name;
-
-        if (gltfCam.type == "perspective") {
-            cam.isPerspective = true;
-            cam.fov = glm::degrees(
-                static_cast<float>(gltfCam.perspective.yfov)
-            );
-            cam.aspectRatio =
-                static_cast<float>(gltfCam.perspective.aspectRatio);
-            cam.nearPlane =
-                static_cast<float>(gltfCam.perspective.znear);
-            cam.farPlane = static_cast<float>(gltfCam.perspective.zfar);
-        } else if (gltfCam.type == "orthographic") {
-            cam.isPerspective = false;
-            cam.xmag = static_cast<float>(gltfCam.orthographic.xmag);
-            cam.ymag = static_cast<float>(gltfCam.orthographic.ymag);
-            cam.nearPlane =
-                static_cast<float>(gltfCam.orthographic.znear);
-            cam.farPlane =
-                static_cast<float>(gltfCam.orthographic.zfar);
-        }
-
-        gltfCameras.push_back(cam);
-    }
-
-    // Find camera transforms from scene nodes
-    for (int nodeIndex : scene.nodes)
-        processCameraNode(model, nodeIndex, glm::mat4(1.0f));
+    // Copy cameras from library
+    gltfCameras = std::move(libModelData.cameras);
 
     if (!gltfCameras.empty()) {
         Log::info(
@@ -512,44 +345,23 @@ void ModelNode::loadModel(
             gltfCameras.size()
         );
         selectedCameraIndex = 0; // Select first camera by default
-        needsCameraApply =
-            true; // Trigger auto-apply when camera UI is shown
+        needsCameraApply = true; // Trigger auto-apply when camera UI is shown
     }
 
-    // We don't load the images directly here yet, because we only want
-    // to load the ones we mark as used (in case we do not support all
-    // features of gltfs and so on)
-    const auto& parentPath = path.parent_path();
-    images.resize(model.images.size());
+    // Set up images and materials based on texture paths from library
+    // The library provides one texture path per material
+    materials.resize(libModelData.texturePaths.size());
+    images.resize(libModelData.texturePaths.size());
 
-    // Collect texture URIs for batch resolution
-    std::vector<std::pair<size_t, std::string>> texturesToResolve;
-    texturesToResolve.reserve(model.textures.size());
-    for (const auto& tex : model.textures) {
-        assert(tex.source >= 0);
-        assert(static_cast<uint32_t>(tex.source) < images.size());
-        texturesToResolve.emplace_back(tex.source, model.images[tex.source].uri);
-    }
-
-    // Resolve all texture paths in parallel
-    auto resolvedPaths = findTexturePathsBatch(
-        parentPath, projectRoot, texturesToResolve, images.size()
-    );
-    for (size_t i = 0; i < images.size(); ++i) {
-        images[i].path = std::move(resolvedPaths[i]);
-    }
-
-    materials.resize(model.materials.size());
-    auto allMaterials = std::views::zip(materials, model.materials);
-    for (auto&& [mat, modelMat] : allMaterials) {
-        // NOTE: baseColorTexture is per gltf spec in SRGB space
-        int tex = modelMat.pbrMetallicRoughness.baseColorTexture.index;
-        if (tex < 0)
-            continue;
-
-        mat.baseTextureIndex = model.textures[tex].source;
-        assert(mat.baseTextureIndex >= 0);
-        images[mat.baseTextureIndex].toLoad = true;
+    for (size_t i = 0; i < libModelData.texturePaths.size(); ++i) {
+        const auto& texPath = libModelData.texturePaths[i];
+        if (!texPath.empty()) {
+            images[i].path = texPath;
+            images[i].toLoad = true;
+            materials[i].baseTextureIndex = static_cast<int>(i);
+        } else {
+            materials[i].baseTextureIndex = -1;
+        }
     }
 
     // Load default texture first so we can use it as a fallback
@@ -606,16 +418,9 @@ void ModelNode::loadModel(
         );
     }
 
-    // Consolidate geometries
-    consolidateGeometries();
-
-    Log::info(
-        "Model", "Loaded full model: {} primitives", geometries.size()
-    );
     Log::info(
         "Model",
-        "Consolidated: {} total vertices, {} total indices, {} "
-        "geometry ranges",
+        "Loaded model: {} total vertices, {} total indices, {} geometry ranges",
         modelData.getTotalVertexCount(), modelData.getTotalIndexCount(),
         modelData.getGeometryCount()
     );
@@ -626,7 +431,7 @@ void ModelNode::loadModel(
 
     // Store the model path and project root for potential reload
     currentModelPath = path.string();
-    this->projectRoot = projectRoot;
+    this->projectRoot = projRoot;
 
     // Set up file watcher for auto-reload
     if (fileWatcher && fileWatchingEnabled) {
@@ -642,316 +447,6 @@ void ModelNode::loadModel(
         fileWatcher->setLoadingState(
             ModelFileWatcher::LoadingState::Loaded
         );
-    }
-}
-
-void ModelNode::consolidateGeometries() {
-    modelData.clear();
-
-    // Pre-calculate total sizes and reserve capacity to avoid reallocations
-    {
-        size_t totalVerts = 0;
-        size_t totalIndices = 0;
-        for (const auto& geom : geometries) {
-            totalVerts += geom.m_vertices.size();
-            totalIndices += geom.m_indices.size();
-        }
-        modelData.vertices.reserve(totalVerts);
-        modelData.indices.reserve(totalIndices);
-        modelData.ranges.reserve(geometries.size());
-    }
-
-    // Get the default topology from settings
-    VkPrimitiveTopology defaultTopology =
-        topologyOptionsEnum[settings.topology];
-
-    // Add each geometry to the consolidated data
-    for (const auto& geom : geometries) {
-        // Use the topology that was set during loading (stored in
-        // settings.topology) or you could store per-geometry topology
-        // if needed
-        modelData.addGeometry(geom, defaultTopology);
-    }
-
-    Log::debug(
-        "Model",
-        "Consolidated {} geometries: {} vertices, {} indices, {} "
-        "ranges",
-        geometries.size(), modelData.getTotalVertexCount(),
-        modelData.getTotalIndexCount(), modelData.getGeometryCount()
-    );
-
-    // Print each range for debugging
-    for (size_t i = 0; i < modelData.ranges.size(); i++) {
-        const auto& range = modelData.ranges[i];
-        Log::debug(
-            "Model",
-            "  Range {}: verts[{}:{}], indices[{}:{}], material={}", i,
-            range.firstVertex, range.firstVertex + range.vertexCount,
-            range.firstIndex, range.firstIndex + range.indexCount,
-            range.materialIndex
-        );
-    }
-}
-
-void ModelNode::processNode(
-    tinygltf::Model& model,
-    int nodeIndex,
-    const glm::mat4& parentTransform
-) {
-    if (nodeIndex < 0 ||
-        static_cast<uint32_t>(nodeIndex) >= model.nodes.size())
-        return;
-
-    const tinygltf::Node& node = model.nodes[nodeIndex];
-    glm::mat4 localTransform = getNodeTransform(node);
-    glm::mat4 worldTransform = parentTransform * localTransform;
-
-    if (node.mesh < 0 ||
-        static_cast<uint32_t>(node.mesh) > model.meshes.size()) {
-        for (int child : node.children)
-            processNode(model, child, worldTransform);
-        return;
-    }
-
-    const auto& mesh = model.meshes[node.mesh];
-    for (const auto& primitive : mesh.primitives) {
-        EditorGeometry geometry{};
-
-        // Set the topology from the glTF primitive mode
-        int mode = (primitive.mode == -1) ? 4 : primitive.mode;
-        VkPrimitiveTopology topology = gltfModeToVulkan(mode);
-
-        // Store the topology - you might want to add this to
-        // Geometry struct for now we'll use the global
-        // settings.topology
-        settings.topology = static_cast<int>(std::distance(
-            topologyOptionsEnum.begin(),
-            std::find(
-                topologyOptionsEnum.begin(), topologyOptionsEnum.end(),
-                topology
-            )
-        ));
-
-        geometry.materialIndex = primitive.material;
-
-        glm::mat3 normalMatrix =
-            glm::transpose(glm::inverse(glm::mat3(worldTransform)));
-
-        if (primitive.attributes.find("POSITION") ==
-            primitive.attributes.end()) {
-            Log::warning(
-                "Model",
-                "Primitive missing POSITION attribute, skipping"
-            );
-            continue;
-        }
-
-        const tinygltf::Accessor& posAccessor =
-            model.accessors[primitive.attributes.at("POSITION")];
-
-        const tinygltf::Accessor* normalAccessor = nullptr;
-        bool hasNormals = primitive.attributes.find("NORMAL") !=
-                          primitive.attributes.end();
-        if (hasNormals) {
-            normalAccessor =
-                &model.accessors[primitive.attributes.at("NORMAL")];
-        }
-
-        bool hasTexCoords = primitive.attributes.find("TEXCOORD_0") !=
-                            primitive.attributes.end();
-        const tinygltf::Accessor* texCoordAccessor = nullptr;
-        if (hasTexCoords) {
-            texCoordAccessor =
-                &model.accessors[primitive.attributes.at("TEXCOORD_0")];
-        }
-
-        const tinygltf::BufferView& posBufferView =
-            model.bufferViews[posAccessor.bufferView];
-        const tinygltf::BufferView* normalBufferView = nullptr;
-        const tinygltf::BufferView* texCoordBufferView = nullptr;
-
-        if (hasNormals) {
-            normalBufferView =
-                &model.bufferViews[normalAccessor->bufferView];
-        }
-        if (hasTexCoords) {
-            texCoordBufferView =
-                &model.bufferViews[texCoordAccessor->bufferView];
-        }
-
-        const tinygltf::Buffer& posBuffer =
-            model.buffers[posBufferView.buffer];
-        const tinygltf::Buffer* normalBuffer = nullptr;
-        const tinygltf::Buffer* texCoordBuffer = nullptr;
-
-        if (hasNormals) {
-            normalBuffer = &model.buffers[normalBufferView->buffer];
-        }
-        if (hasTexCoords) {
-            texCoordBuffer = &model.buffers[texCoordBufferView->buffer];
-        }
-
-        size_t posStride = posBufferView.byteStride
-                               ? posBufferView.byteStride
-                               : sizeof(float) * 3;
-        size_t normalStride =
-            (hasNormals && normalBufferView->byteStride)
-                ? normalBufferView->byteStride
-                : sizeof(float) * 3;
-        size_t texCoordStride =
-            (hasTexCoords && texCoordBufferView->byteStride)
-                ? texCoordBufferView->byteStride
-                : sizeof(float) * 2;
-
-        const uint8_t* posData =
-            &posBuffer.data
-                 [posBufferView.byteOffset + posAccessor.byteOffset];
-        const uint8_t* normalData = nullptr;
-        const uint8_t* texCoordData = nullptr;
-
-        if (hasNormals) {
-            normalData = &normalBuffer->data
-                              [normalBufferView->byteOffset +
-                               normalAccessor->byteOffset];
-        }
-        if (hasTexCoords) {
-            texCoordData = &texCoordBuffer->data
-                                [texCoordBufferView->byteOffset +
-                                 texCoordAccessor->byteOffset];
-        }
-
-        // Pre-allocate vertices based on accessor count (glTF vertices
-        // are already deduplicated)
-        const size_t vertexCount = posAccessor.count;
-        geometry.m_vertices.resize(vertexCount);
-
-        // Process all vertices in a single pass - much faster than
-        // per-index processing
-        for (size_t i = 0; i < vertexCount; ++i) {
-            Vertex& vertex = geometry.m_vertices[i];
-
-            const float* pos = reinterpret_cast<const float*>(
-                posData + i * posStride
-            );
-            glm::vec4 worldPos =
-                worldTransform *
-                glm::vec4(pos[0], pos[1], pos[2], 1.0f);
-            vertex.pos = glm::vec3(worldPos);
-
-            if (hasNormals) {
-                const float* norm = reinterpret_cast<const float*>(
-                    normalData + i * normalStride
-                );
-                glm::vec3 transformedNormal =
-                    normalMatrix *
-                    glm::vec3(norm[0], norm[1], norm[2]);
-                vertex.normal = glm::normalize(transformedNormal);
-            } else {
-                vertex.normal = {0.0f, 0.0f, 1.0f};
-            }
-
-            if (hasTexCoords) {
-                const float* tex = reinterpret_cast<const float*>(
-                    texCoordData + i * texCoordStride
-                );
-                vertex.texCoord = {tex[0], tex[1]};
-            } else {
-                vertex.texCoord = {0.0f, 0.0f};
-            }
-        }
-
-        // Copy indices directly - no hash map lookups needed
-        if (primitive.indices >= 0) {
-            const tinygltf::Accessor& indexAccessor =
-                model.accessors[primitive.indices];
-            const tinygltf::BufferView& indexBufferView =
-                model.bufferViews[indexAccessor.bufferView];
-            const tinygltf::Buffer& indexBuffer =
-                model.buffers[indexBufferView.buffer];
-            const uint8_t* indexData = &indexBuffer.data
-                                         [indexBufferView.byteOffset +
-                                          indexAccessor.byteOffset];
-
-            const size_t indexCount = indexAccessor.count;
-            geometry.m_indices.resize(indexCount);
-
-            // Copy indices based on component type
-            switch (indexAccessor.componentType) {
-            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
-                std::memcpy(
-                    geometry.m_indices.data(), indexData,
-                    indexCount * sizeof(uint32_t)
-                );
-                break;
-            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: {
-                const uint16_t* src =
-                    reinterpret_cast<const uint16_t*>(indexData);
-                for (size_t i = 0; i < indexCount; ++i) {
-                    geometry.m_indices[i] = src[i];
-                }
-                break;
-            }
-            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: {
-                for (size_t i = 0; i < indexCount; ++i) {
-                    geometry.m_indices[i] = indexData[i];
-                }
-                break;
-            }
-            default:
-                throw std::runtime_error(
-                    "Unsupported index component type"
-                );
-            }
-        }
-
-        if (!geometry.m_vertices.empty()) {
-            geometries.push_back(std::move(geometry));
-            Log::debug(
-                "Model",
-                "Loaded geometry with {} vertices, {} indices, "
-                "material {} (node: {})",
-                geometries.back().m_vertices.size(),
-                geometries.back().m_indices.size(),
-                geometries.back().materialIndex, nodeIndex
-            );
-        }
-    }
-
-    for (int child : node.children) {
-        processNode(model, child, worldTransform);
-    }
-}
-
-void ModelNode::processCameraNode(
-    tinygltf::Model& model,
-    int nodeIndex,
-    const glm::mat4& parentTransform
-) {
-    if (nodeIndex < 0 ||
-        static_cast<uint32_t>(nodeIndex) >= model.nodes.size())
-        return;
-
-    const tinygltf::Node& node = model.nodes[nodeIndex];
-    glm::mat4 localTransform = getNodeTransform(node);
-    glm::mat4 worldTransform = parentTransform * localTransform;
-
-    // Check if this node has a camera
-    if (node.camera >= 0 &&
-        static_cast<size_t>(node.camera) < gltfCameras.size()) {
-        GLTFCamera& cam = gltfCameras[node.camera];
-        cam.transform = worldTransform;
-        // Extract position from transform matrix
-        cam.position = glm::vec3(worldTransform[3]);
-        Log::debug(
-            "Model", "Camera '{}' at position ({}, {}, {})", cam.name,
-            cam.position.x, cam.position.y, cam.position.z
-        );
-    }
-
-    // Process children
-    for (int child : node.children) {
-        processCameraNode(model, child, worldTransform);
     }
 }
 

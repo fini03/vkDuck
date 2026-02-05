@@ -539,10 +539,12 @@ ModelData loadModel(const std::string& path, const std::string& projectRoot) {
         // Add vertices
         result.vertices.insert(result.vertices.end(), geom.vertices.begin(), geom.vertices.end());
 
-        // Add indices (offset by current vertex count)
-        for (uint32_t idx : geom.indices) {
-            result.indices.push_back(idx + vertexOffset);
-        }
+        // Add indices as-is (NOT rebased to absolute)
+        // The ranges contain firstVertex which tells us where each geometry's vertices start
+        // This allows consumers to either:
+        // 1. Use the full consolidated buffer with vkCmdDrawIndexed(..., firstVertex=range.firstVertex)
+        // 2. Create per-geometry slices where indices remain relative
+        result.indices.insert(result.indices.end(), geom.indices.begin(), geom.indices.end());
 
         vertexOffset += range.vertexCount;
         indexOffset += range.indexCount;
@@ -561,7 +563,6 @@ void loadModelGeometry(
     std::vector<Vertex>& outVertices,
     std::vector<uint32_t>& outIndices
 ) {
-
     if (geometryIndex >= data.ranges.size()) {
         throw std::runtime_error("Geometry index out of range: " +
             std::to_string(geometryIndex) + " >= " + std::to_string(data.ranges.size()));
@@ -575,16 +576,11 @@ void loadModelGeometry(
         data.vertices.begin() + range.firstVertex + range.vertexCount
     );
 
-    // Extract and rebase indices for this geometry
-    outIndices.clear();
-    outIndices.reserve(range.indexCount);
-    for (uint32_t i = 0; i < range.indexCount; ++i) {
-        // Indices in the consolidated buffer point to absolute positions,
-        // we need to rebase them to be relative to this geometry's vertex offset
-        uint32_t absoluteIndex = data.indices[range.firstIndex + i];
-        uint32_t relativeIndex = absoluteIndex - range.firstVertex;
-        outIndices.push_back(relativeIndex);
-    }
+    // Extract indices for this geometry (they are already relative to each geometry's vertex buffer)
+    outIndices.assign(
+        data.indices.begin() + range.firstIndex,
+        data.indices.begin() + range.firstIndex + range.indexCount
+    );
 }
 
 std::unordered_map<std::string, ModelData> loadModelsAsync(const std::vector<std::string>& paths) {

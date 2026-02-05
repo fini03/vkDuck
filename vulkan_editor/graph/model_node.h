@@ -13,11 +13,6 @@
 // Use shared types from vkDuck library
 #include <vkDuck/model_loader.h>
 
-namespace tinygltf {
-class Model;
-struct Node;
-}
-
 using namespace ShaderTypes;
 
 // Editor-specific types (renamed to avoid conflicts with vkDuck types)
@@ -48,16 +43,6 @@ struct EditorGeometryRange {
     VkPrimitiveTopology topology;
 };
 
-struct EditorGeometry {
-    std::vector<Vertex> m_vertices;
-    std::vector<uint32_t> m_indices;
-    VkBuffer m_vertexBuffer;
-    VmaAllocation m_vertexBufferAllocation;
-    VkBuffer m_indexBuffer;
-    VmaAllocation m_indexBufferAllocation;
-    int materialIndex = 0;
-};
-
 struct ConsolidatedModelData {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
@@ -67,20 +52,6 @@ struct ConsolidatedModelData {
     VmaAllocation vertexBufferAllocation = VK_NULL_HANDLE;
     VkBuffer indexBuffer = VK_NULL_HANDLE;
     VmaAllocation indexBufferAllocation = VK_NULL_HANDLE;
-
-    void addGeometry(const EditorGeometry& geom, VkPrimitiveTopology topology) {
-        EditorGeometryRange range;
-        range.firstVertex = static_cast<uint32_t>(vertices.size());
-        range.vertexCount = static_cast<uint32_t>(geom.m_vertices.size());
-        range.firstIndex = static_cast<uint32_t>(indices.size());
-        range.indexCount = static_cast<uint32_t>(geom.m_indices.size());
-        range.materialIndex = geom.materialIndex;
-        range.topology = topology;
-
-        vertices.insert(vertices.end(), geom.m_vertices.begin(), geom.m_vertices.end());
-        indices.insert(indices.end(), geom.m_indices.begin(), geom.m_indices.end());
-        ranges.push_back(range);
-    }
 
     void clear() {
         vertices.clear();
@@ -188,7 +159,6 @@ public:
     void fromJson(const nlohmann::json& j) override;
 
     void loadModel(const std::filesystem::path& path, const std::filesystem::path& projectRoot = "");
-    VkPrimitiveTopology gltfModeToVulkan(int mode);
 
     static const std::vector<const char*> topologyOptions;
     ModelSettings settings;
@@ -198,7 +168,6 @@ public:
     Pin vertexDataPin;
     Pin cameraPin;
 
-    std::vector<EditorGeometry> geometries;
     std::vector<EditorMaterial> materials;
     std::vector<EditorImage> images;
 
@@ -232,19 +201,6 @@ public:
 
 private:
     void createDefaultPins();
-    void processNode(
-        tinygltf::Model& model,
-        int nodeIndex,
-        const glm::mat4& parentTransform
-    );
-    void processCameraNode(
-        tinygltf::Model& model,
-        int nodeIndex,
-        const glm::mat4& parentTransform
-    );
-    glm::mat4 getNodeTransform(const tinygltf::Node& node);
-
-    void consolidateGeometries();
 
     EditorImage defaultTexture{};
 
