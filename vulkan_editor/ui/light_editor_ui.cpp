@@ -1,6 +1,6 @@
 #include "light_editor_ui.h"
 #include "vulkan_editor/graph/light_node.h"
-#include <cmath>
+#include <numbers>
 
 void LightEditorUI::Draw(LightNode* lightNode) {
     if (!lightNode)
@@ -34,7 +34,7 @@ void LightEditorUI::Draw(LightNode* lightNode) {
         if (ImGui::Button("Arrange in Circle")) {
             for (int i = 0; i < lightNode->numLights; ++i) {
                 float angle = (float)i / (float)lightNode->numLights *
-                              2.0f * M_PI;
+                              2.0f * std::numbers::pi_v<float>;
                 float radius = 5.0f;
 
                 lightNode->lights[i].position = glm::vec3(
