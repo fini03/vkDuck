@@ -10,8 +10,7 @@ void CameraController::init(CameraType cameraType,
                             const glm::vec3& upDir,
                             float yawAngle, float pitchAngle, float dist,
                             float movSpd, float rotSpd, float zoomSpd,
-                            float fieldOfView, float nearP, float farP) {
-
+                            float fieldOfView, float near, float far) {
     type = cameraType;
     position = pos;
     target = tgt;
@@ -23,8 +22,8 @@ void CameraController::init(CameraType cameraType,
     rotateSpeed = rotSpd;
     zoomSpeed = zoomSpd;
     fov = fieldOfView;
-    nearPlane = nearP;
-    farPlane = farP;
+    nearPlane = near;
+    farPlane = far;
 
     // Ensure position/target consistency based on camera type
     if (type == CameraType::Orbital) {

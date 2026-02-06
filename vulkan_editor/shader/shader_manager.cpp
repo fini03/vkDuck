@@ -719,8 +719,7 @@ void ShaderManager::showShaderPicker(
         for (int i = 0; const auto& shader : slangShaders) {
             bool isSelected = (i == currentIndex);
 
-	    auto shaderPathStr{shader.string()};
-            if (ImGui::Selectable(shaderPathStr.c_str(), isSelected)) {
+            if (ImGui::Selectable(shader.c_str(), isSelected)) {
                 // Save old paths in case compilation fails
                 fs::path oldPathProject = outPathProject;
                 fs::path oldCompiledPath = outCompiledPath;
@@ -896,8 +895,7 @@ bool ShaderManager::showModelPicker(
         for (int i = 0; const auto& model : modelFiles) {
             bool isSelected = (i == currentIndex);
 
-	    auto modelPathStr{model.string()};
-            if (ImGui::Selectable(modelPathStr.c_str(), isSelected)) {
+            if (ImGui::Selectable(model.c_str(), isSelected)) {
                 outModelPath = model;
                 selected = true;
             }

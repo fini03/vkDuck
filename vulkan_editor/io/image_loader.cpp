@@ -1,16 +1,10 @@
 #include "image_loader.h"
 #include "../util/logger.h"
 #include <fstream>
-#ifdef _WIN32
-#include <Windows.h>
-#else
-extern "C" {
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
-}
-#endif
 
 #define WUFFS_IMPLEMENTATION
 #define WUFFS_CONFIG__STATIC_FUNCTIONS
@@ -27,70 +21,7 @@ extern "C" {
 
 namespace fs = std::filesystem;
 
-#ifdef _WIN32
-struct MappedFile {
-    LPVOID data{nullptr};
-    size_t size{0};
-    HANDLE hFile{INVALID_HANDLE_VALUE};
-    HANDLE hMap{INVALID_HANDLE_VALUE};
-
-    MappedFile(const fs::path& path) {
-	auto pathStr{path.string()};
-        hFile = CreateFile(
-            pathStr.c_str(),
-            GENERIC_READ,
-            FILE_SHARE_READ,
-            nullptr,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
-            nullptr
-        );
-        if (hFile == INVALID_HANDLE_VALUE) return;
-
-        LARGE_INTEGER liFileSize{};
-        if (!GetFileSizeEx(hFile, &liFileSize)) return;
-        if (liFileSize.QuadPart == 0) return;
-        size = static_cast<size_t>(liFileSize.QuadPart);
-
-        hMap = CreateFileMapping(
-            hFile,
-            nullptr,
-            PAGE_READONLY,
-            0,
-            0,
-            nullptr
-        );
-        if (hMap == INVALID_HANDLE_VALUE) return;
-
-
-        data = MapViewOfFile(
-            hMap,
-            FILE_MAP_READ,
-            0,
-            0,
-            0
-        );
-        if (data == nullptr) return;
-    }
-
-    ~MappedFile() {
-        if (data) UnmapViewOfFile(data);
-        if (hMap != INVALID_HANDLE_VALUE) CloseHandle(hMap);
-        if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
-
-        data = nullptr;
-        hMap = INVALID_HANDLE_VALUE;
-        hFile = INVALID_HANDLE_VALUE;
-    }
-
-    MappedFile(const MappedFile&) = delete;
-    MappedFile& operator=(const MappedFile&) = delete;
-
-    bool isValid() const { return data != nullptr; }
-};
-
-#else
-
+// Memory-mapped file for zero-copy I/O
 struct MappedFile {
     void* data = nullptr;
     size_t size = 0;
@@ -130,8 +61,117 @@ struct MappedFile {
 
     bool isValid() const { return data != nullptr; }
 };
-#endif
 
+class Wuffs_LoadRaw_Callbacks : public wuffs_aux::DecodeImageCallbacks {
+public:
+    Wuffs_LoadRaw_Callbacks()
+        : m_surface(nullptr) {}
+
+    ~Wuffs_LoadRaw_Callbacks() {
+        if (m_surface) {
+            delete[] m_surface;
+            m_surface = nullptr;
+        }
+    }
+
+    uint8_t* TakeSurface(
+        uint32_t& width,
+        uint32_t& height
+    ) {
+        if (!m_surface) {
+            return nullptr;
+        }
+
+        auto ret = m_surface;
+        m_surface = nullptr;
+        return ret;
+    }
+
+private:
+    wuffs_base__pixel_format SelectPixfmt(
+        const wuffs_base__image_config& image_config
+    ) override {
+        return wuffs_base__make_pixel_format(
+            WUFFS_BASE__PIXEL_FORMAT__BGRA_NONPREMUL
+        );
+    }
+
+    AllocPixbufResult AllocPixbuf(
+        const wuffs_base__image_config& image_config,
+        bool allow_uninitialized_memory
+    ) override {
+        if (m_surface) {
+            delete[] m_surface;
+            m_surface = nullptr;
+        }
+
+        w = image_config.pixcfg.width();
+        h = image_config.pixcfg.height();
+        if ((w > 0xFFFFFF) || (h > 0xFFFFFF)) {
+            return AllocPixbufResult(
+                "Wuffs_Load_RW_Callbacks: image is too large"
+            );
+        }
+
+        m_surface = new uint8_t[w * h * 4];
+        if (!m_surface) {
+            return AllocPixbufResult(
+                "Wuffs_Load_RW_Callbacks: Surface alloc failed"
+            );
+        }
+
+        wuffs_base__pixel_buffer pixbuf;
+        wuffs_base__status status = pixbuf.set_interleaved(
+            &image_config.pixcfg,
+            wuffs_base__make_table_u8(
+                static_cast<uint8_t*>(m_surface), w * 4, h, w * 4
+            ),
+            wuffs_base__empty_slice_u8()
+        );
+        if (!status.is_ok()) {
+            delete[] m_surface;
+            m_surface = nullptr;
+            return AllocPixbufResult(status.message());
+        }
+        return AllocPixbufResult(
+            wuffs_aux::MemOwner(NULL, &free), pixbuf
+        );
+    }
+
+    uint8_t* m_surface;
+    uint32_t w;
+    uint32_t h;
+};
+
+class Wuffs_LoadRaw_Input : public wuffs_aux::sync_io::Input {
+public:
+    Wuffs_LoadRaw_Input(const fs::path& texturePath)
+        : fin{texturePath,
+              std::ios::binary} {}
+
+private:
+    std::string CopyIn(wuffs_aux::IOBuffer* dst) override {
+        if (!fin) {
+            return "Wuffs_Load_RW_Input: File not open";
+        } else if (!dst) {
+            return "Wuffs_Load_RW_Input: NULL IOBuffer";
+        } else if (dst->meta.closed) {
+            return "Wuffs_Load_RW_Input: end of file";
+        }
+        dst->compact();
+        if (dst->writer_length() == 0) {
+            return "Wuffs_Load_RW_Input: full IOBuffer";
+        }
+        fin.read(
+            reinterpret_cast<char*>(dst->writer_pointer()),
+            dst->writer_length()
+        );
+        dst->meta.wi += fin.gcount();
+        return std::string();
+    }
+
+    std::ifstream fin;
+};
 
 void* imageLoad(
     const std::filesystem::path& path,

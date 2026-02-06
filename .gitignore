@@ -8,9 +8,6 @@ imgui.ini
 /subprojects/imgui
 /subprojects/inja
 /subprojects/imgui-node-editor
-/subprojects/glm-*
-/subprojects/SDL3-*
-/subprojects/nlohmann_json-*
 /subprojects/packagecache
 /subprojects/shader-slang-*/
 /subprojects/shader-slang-*.wrap

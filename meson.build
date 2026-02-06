@@ -2,31 +2,22 @@ project(
   'vkDuck', ['cpp'],
   version: '0.1',
   default_options: [
+    'cpp_std=c++23',
     'buildtype=debugoptimized',
     'debug=true'
   ]
 )
-
-# MSVC does not implement a c++23 version yet
-cpp = meson.get_compiler('cpp')
-if cpp.get_id() == 'msvc'
-  add_project_arguments('/std:c++23preview', language: 'cpp')
-  add_project_link_arguments('/stack:16777216', language: 'cpp')
-else
-  add_project_arguments('-std=c++23', language: 'cpp')
-endif
 
 # vkDuck shared library (used by both editor and generated projects)
 vkDuck_proj = subproject('vkDuck')
 vkDuck_dep = vkDuck_proj.get_variable('vkDuck_dep')
 
 # Dependencies
-sdl3 = dependency('sdl3', include_type: 'system')
+sdl3 = dependency('sdl3')
 vulkan = dependency('vulkan')
 glm = dependency('glm')
 imgui = dependency('imgui')
 imnodes = dependency('imgui-node-editor', include_type: 'system')
-nlohmann_json = dependency('nlohmann_json')
 shader_slang = dependency('shader-slang')
 vma = dependency('vulkan-memory-allocator', include_type: 'system')
 efsw = dependency('efsw')
@@ -110,7 +101,6 @@ executable(
     imnodes,
     vma,
     efsw,
-    nlohmann_json,
     vkDuck_dep,
   ],
   cpp_args: ['-DVKDUCK_NO_VMA_IMPLEMENTATION'],

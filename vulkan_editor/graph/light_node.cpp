@@ -4,8 +4,8 @@
 #include "external/utilities/builders.h"
 #include "external/utilities/widgets.h"
 #include "node.h"
+#include <cmath>
 #include <imgui.h>
-#include <numbers>
 
 namespace {
 constexpr float PADDING_X = 10.0f;
@@ -127,7 +127,7 @@ void LightNode::ensureLightCount() {
 
         // Position lights in a circle by default
         for (int i = 0; i < numLights; ++i) {
-            float angle = (float)i / (float)numLights * 2.0f * std::numbers::pi_v<float>;
+            float angle = (float)i / (float)numLights * 2.0f * M_PI;
             float radius = 5.0f;
 
             lights[i].position = glm::vec3(

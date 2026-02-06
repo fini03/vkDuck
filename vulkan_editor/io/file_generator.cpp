@@ -533,7 +533,6 @@ void FileGenerator::generatePrimitives(
         }
 
         print(out, "// vim:foldmethod=marker\n");
-        print(out, "#include <filesystem>\n");
         print(out, "#include \"primitives.h\"\n\n");
         primitiveGenerator.generateDefinitions(store, out);
 

@@ -4,19 +4,11 @@
 project('vkDuck', 'cpp',
   version: '1.0.0',
   default_options: [
+    'cpp_std=c++23',
     'warning_level=2',
     'buildtype=debugoptimized'
   ]
 )
-
-# MSVC does not implement a c++23 version yet
-cpp = meson.get_compiler('cpp')
-if cpp.get_id() == 'msvc'
-  add_project_arguments('/std:c++23preview', language: 'cpp')
-  add_project_link_arguments('/stack:16777216', language: 'cpp')
-else
-  add_project_arguments('-std=c++23', language: 'cpp')
-endif
 
 # Dependencies
 vulkan_dep = dependency('vulkan', required: true)

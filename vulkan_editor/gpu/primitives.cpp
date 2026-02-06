@@ -2990,8 +2990,7 @@ void Shader::generateCreate(const Store& store, std::ostream& out) const {
     print(out,
         "// Shader: {0} (stage={1}, entryPoint={2})\n"
         "{{\n"
-	"    auto {0}_path = std::filesystem::path{{\"{3}\"}}.string();\n"
-        "    auto {0}_code = readFile({0}_path.c_str());\n"
+        "    auto {0}_code = readFile(\"{3}\");\n"
         "    {0} = createShaderModule(device, {0}_code);\n"
         "}}\n\n"
         ,
