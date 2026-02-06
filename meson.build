@@ -18,6 +18,7 @@ vulkan = dependency('vulkan')
 glm = dependency('glm')
 imgui = dependency('imgui')
 imnodes = dependency('imgui-node-editor', include_type: 'system')
+nlohmann_json = dependency('nlohmann_json')
 shader_slang = dependency('shader-slang')
 vma = dependency('vulkan-memory-allocator', include_type: 'system')
 efsw = dependency('efsw')
@@ -101,6 +102,7 @@ executable(
     imnodes,
     vma,
     efsw,
+    nlohmann_json,
     vkDuck_dep,
   ],
   cpp_args: ['-DVKDUCK_NO_VMA_IMPLEMENTATION'],

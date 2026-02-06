@@ -4,6 +4,8 @@ if host_machine.system() == 'linux' and host_machine.cpu_family() == 'x86_64'
   slang_dep = dependency('shader-slang-linux-x86_64')
 elif host_machine.system() == 'darwin' and host_machine.cpu_family() == 'aarch64'
   slang_dep = dependency('shader-slang-macos-aarch64')
+elif host_machine.system() == 'windows' and host_machine.cpu_family() == 'x86_64'
+  slang_dep = dependency('shader-slang-windows-x86_64')
 else
   error('Current architecture is not supported')
 endif
