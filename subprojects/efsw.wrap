@@ -5,4 +5,4 @@ depth = 1
 method = cmake 
 
 [provide]
-efsw = efsw_dep
+efsw = efsw_static_dep

@@ -663,7 +663,7 @@ static void runSilentA(char const * const aString)
 	PROCESS_INFORMATION ProcessInfo;
 	char * lArgs;
 	char * pEnvCMD = NULL;
-	char * pDefaultCMD = "CMD.EXE";
+	const char * pDefaultCMD = "CMD.EXE";
 	ULONG rc;
 	int lStringLen = 0;
 
@@ -721,7 +721,7 @@ static void runSilentW(wchar_t const * const aString)
 	ULONG rc;
 	wchar_t * lArgs;
 	wchar_t * pEnvCMD;
-	wchar_t * pDefaultCMD = L"CMD.EXE";
+	const wchar_t * pDefaultCMD = L"CMD.EXE";
 	int lStringLen = 0;
 
 	memset(&StartupInfo, 0, sizeof(StartupInfo));

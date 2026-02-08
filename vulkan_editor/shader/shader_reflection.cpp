@@ -985,8 +985,9 @@ ShaderParsedResult ShaderReflection::reflectShader(
     Slang::ComPtr<slang::IModule> slangModule;
     {
         Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+	auto modulePathStr{moduleName.string()};
         slangModule = session->loadModule(
-            moduleName.c_str(), diagnosticsBlob.writeRef()
+            modulePathStr.c_str(), diagnosticsBlob.writeRef()
         );
         if (!slangModule) {
             if (diagnosticsBlob) {
