@@ -809,12 +809,10 @@ void FileGenerator::generateCameraInstances(
     }
 
     // Generate the updateCameraUBO helper function
+    // Uses CameraData from vkDuck library instead of shader-reflected Camera struct
     print(out, "void updateCameraUBO(void* mappedMemory, const CameraController& camera) {{\n");
-    print(out, "    Camera ubo;\n");
-    print(out, "    ubo.view = camera.getViewMatrix();\n");
-    print(out, "    ubo.invView = glm::inverse(ubo.view);\n");
-    print(out, "    ubo.proj = camera.getProjectionMatrix();\n\n");
-    print(out, "    memcpy(mappedMemory, &ubo, sizeof(Camera));\n");
+    print(out, "    CameraData data = camera.getCameraData();\n");
+    print(out, "    memcpy(mappedMemory, &data, sizeof(CameraData));\n");
     print(out, "}}\n");
 
     Log::info("FileGenerator", "Generated: {}", outFile.string());
