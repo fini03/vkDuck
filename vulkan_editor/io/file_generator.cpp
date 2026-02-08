@@ -342,31 +342,6 @@ void FileGenerator::generateSDKLinks(const std::filesystem::path& projectRoot) {
             Log::warning("FileGenerator", "Failed to copy VMA packagefiles: {}", e.what());
         }
     }
-
-    // === Copy licenses ===
-    fs::path licensesDir = editorRoot / "licenses";
-    if (fs::exists(licensesDir)) {
-        try {
-            for (const auto& entry : fs::directory_iterator(licensesDir)) {
-                if (entry.is_directory()) {
-                    // Each license is in a subdirectory with LICENSE file
-                    fs::path licenseFile = entry.path() / "LICENSE";
-                    if (fs::exists(licenseFile)) {
-                        std::string name = entry.path().filename().string() + "-LICENSE";
-                        fs::copy_file(licenseFile, projectLicenses / name, fs::copy_options::overwrite_existing);
-                    }
-                }
-            }
-            // Copy main project license
-            fs::path mainLicense = editorRoot / "LICENSE";
-            if (fs::exists(mainLicense)) {
-                fs::copy_file(mainLicense, projectLicenses / "vkDuck-LICENSE", fs::copy_options::overwrite_existing);
-            }
-            Log::info("FileGenerator", "Copied licenses");
-        } catch (const fs::filesystem_error& e) {
-            Log::warning("FileGenerator", "Failed to copy licenses: {}", e.what());
-        }
-    }
 }
 
 void FileGenerator::generatePrimitives(
@@ -533,6 +508,7 @@ void FileGenerator::generatePrimitives(
         }
 
         print(out, "// vim:foldmethod=marker\n");
+        print(out, "#include <filesystem>\n");
         print(out, "#include \"primitives.h\"\n\n");
         primitiveGenerator.generateDefinitions(store, out);
 

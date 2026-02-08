@@ -2,11 +2,19 @@ project(
   'vkDuck', ['cpp'],
   version: '0.1',
   default_options: [
-    'cpp_std=c++23',
     'buildtype=debugoptimized',
     'debug=true'
   ]
 )
+
+# MSVC does not implement a c++23 version yet
+cpp = meson.get_compiler('cpp')
+if cpp.get_id() == 'msvc'
+  add_project_arguments('/std:c++23preview', language: 'cpp')
+  add_project_link_arguments('/stack:16777216', language: 'cpp')
+else
+  add_project_arguments('-std=c++23', language: 'cpp')
+endif
 
 # vkDuck shared library (used by both editor and generated projects)
 vkDuck_proj = subproject('vkDuck')
@@ -18,9 +26,17 @@ vulkan = dependency('vulkan')
 glm = dependency('glm')
 imgui = dependency('imgui')
 imnodes = dependency('imgui-node-editor', include_type: 'system')
+nlohmann_json = dependency('nlohmann_json')
 shader_slang = dependency('shader-slang')
 vma = dependency('vulkan-memory-allocator', include_type: 'system')
 efsw = dependency('efsw')
+
+# macOS frameworks required by efsw for FSEvents
+if host_machine.system() == 'darwin'
+  corefoundation = dependency('appleframeworks', modules: ['CoreFoundation', 'CoreServices'])
+else
+  corefoundation = []
+endif
 
 vulkan_files = files(
 	'vulkan_base/vulkan_device.cpp',
@@ -101,7 +117,9 @@ executable(
     imnodes,
     vma,
     efsw,
+    nlohmann_json,
     vkDuck_dep,
+    corefoundation,
   ],
   cpp_args: ['-DVKDUCK_NO_VMA_IMPLEMENTATION'],
   include_directories: ['external'],
