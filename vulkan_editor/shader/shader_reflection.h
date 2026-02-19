@@ -25,18 +25,27 @@ using ShaderTypes::VertexInputAttribute;
  */
 class ShaderReflection {
 public:
+    // Session management
     static Slang::ComPtr<slang::IGlobalSession> initializeSlang();
     static void resetSession();
+
+    // Main reflection entry point
     static ShaderParsedResult reflectShader(
         const std::filesystem::path& moduleName,
         SlangStage stage,
         const std::filesystem::path& projectRoot = {}
     );
+
+    // Debug/utility
     static void printParsedResult(const ShaderParsedResult& result);
     static std::string descriptorTypeToString(VkDescriptorType type);
     static std::string shaderStageToString(VkShaderStageFlags flags);
+
+    // Type helpers (public for use by static helper functions)
     static MemberInfo extractMemberInfo(slang::VariableReflection* member);
     static std::string getFullTypeName(slang::TypeReflection* type);
+    static const char* getTypeKindName(slang::TypeReflection::Kind kind);
+    static void diagnoseIfNeeded(slang::IBlob* diagnosticsBlob, bool isError = true);
 
 private:
     static std::vector<BindingInfo> parseBindings(slang::ProgramLayout* layout, SlangStage stage);
@@ -48,7 +57,5 @@ private:
     );
     static std::vector<OutputInfo> collectOutputs(slang::VariableLayoutReflection* varLayout);
     static std::vector<VertexInputAttribute> collectVertexInputs(slang::EntryPointReflection* entryPoint);
-    static const char* getTypeKindName(slang::TypeReflection::Kind kind);
     static VkShaderStageFlags getVkStageFlags(SlangStage stage);
-    static void diagnoseIfNeeded(slang::IBlob* diagnosticsBlob, bool isError = true);
 };
