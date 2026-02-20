@@ -15,7 +15,8 @@ public:
         const std::filesystem::path& projectRoot
     );
 
-    // Default shader paths (relative to project root)
-    static constexpr const char* DEFAULT_VERT_SHADER = "shaders/default_phong_vert.slang";
-    static constexpr const char* DEFAULT_FRAG_SHADER = "shaders/default_phong_frag.slang";
+    // Default shader directory and filenames (relative to project root)
+    static constexpr const char* SHADER_DIR = "shaders";
+    static constexpr const char* DEFAULT_VERT_SHADER = "default_phong_vert.slang";
+    static constexpr const char* DEFAULT_FRAG_SHADER = "default_phong_frag.slang";
 };

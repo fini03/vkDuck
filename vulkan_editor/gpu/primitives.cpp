@@ -2998,7 +2998,7 @@ void Shader::generateCreate(const Store& store, std::ostream& out) const {
         name,
         string_VkShaderStageFlagBits(stage),
         entryPoint,
-        shaderPath.string());
+        shaderPath.generic_string());
 }
 
 void Shader::generateDestroy(const Store& store, std::ostream& out) const {

@@ -1,0 +1,9 @@
+[wrap-file]
+source_url = https://github.com/shader-slang/slang/releases/download/v2025.24.1/slang-2025.24.1-windows-x86_64.zip
+source_filename = slang-2025.24.1-windows-x86_64.zip
+source_hash = fdf3709f6be625ee42ba84fae9cb632ebcec279be505923fba61a0249610b854
+lead_directory_missing = true
+patch_directory = libslang
+
+[provide]
+shader-slang-windows-x86_64 = slang_dep

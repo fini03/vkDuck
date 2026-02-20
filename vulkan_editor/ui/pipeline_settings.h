@@ -125,10 +125,10 @@ struct PipelineSettings : public ISerializable {
         };
 
         // Shader paths (all project-relative)
-        j["vertexShaderPath"] = vertexShaderPath.string();
-        j["compiledVertexShaderPath"] = compiledVertexShaderPath.string();
-        j["fragmentShaderPath"] = fragmentShaderPath.string();
-        j["compiledFragmentShaderPath"] = compiledFragmentShaderPath.string();
+        j["vertexShaderPath"] = vertexShaderPath.generic_string();
+        j["compiledVertexShaderPath"] = compiledVertexShaderPath.generic_string();
+        j["fragmentShaderPath"] = fragmentShaderPath.generic_string();
+        j["compiledFragmentShaderPath"] = compiledFragmentShaderPath.generic_string();
 
         return j;
     }

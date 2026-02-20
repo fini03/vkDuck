@@ -360,7 +360,7 @@ void ShaderManager::onShaderFileChanged(const std::string& filepath) {
     }
 
     // Queue the reload
-    queueReload(relPath.generic_string());
+    queueReload(relPath.string());
 }
 
 void ShaderManager::queueReload(const std::string& filepath) {
@@ -719,7 +719,7 @@ void ShaderManager::showShaderPicker(
         for (int i = 0; const auto& shader : slangShaders) {
             bool isSelected = (i == currentIndex);
 
-	    auto shaderPathStr{shader.string()};
+	    auto shaderPathStr{shader.generic_string()};
             if (ImGui::Selectable(shaderPathStr.c_str(), isSelected)) {
                 // Save old paths in case compilation fails
                 fs::path oldPathProject = outPathProject;
@@ -896,7 +896,7 @@ bool ShaderManager::showModelPicker(
         for (int i = 0; const auto& model : modelFiles) {
             bool isSelected = (i == currentIndex);
 
-	    auto modelPathStr{model.string()};
+	    auto modelPathStr{model.generic_string()};
             if (ImGui::Selectable(modelPathStr.c_str(), isSelected)) {
                 outModelPath = model;
                 selected = true;
