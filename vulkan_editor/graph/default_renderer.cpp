@@ -21,8 +21,8 @@ bool DefaultRendererSetup::createForModel(
     }
 
     // Check if default shaders exist
-    fs::path vertShaderPath = projectRoot / DEFAULT_VERT_SHADER;
-    fs::path fragShaderPath = projectRoot / DEFAULT_FRAG_SHADER;
+    fs::path vertShaderPath = projectRoot / SHADER_DIR / DEFAULT_VERT_SHADER;
+    fs::path fragShaderPath = projectRoot / SHADER_DIR / DEFAULT_FRAG_SHADER;
 
     if (!fs::exists(vertShaderPath)) {
         Log::error("DefaultRenderer", "Default vertex shader not found: {}", vertShaderPath.string());
@@ -88,8 +88,8 @@ bool DefaultRendererSetup::createForModel(
     pipelineNode->isMainPipeline = true;
 
     // Set shader paths (project-relative)
-    pipelineNode->settings.vertexShaderPath = DEFAULT_VERT_SHADER;
-    pipelineNode->settings.fragmentShaderPath = DEFAULT_FRAG_SHADER;
+    pipelineNode->settings.vertexShaderPath = fs::path(SHADER_DIR) / DEFAULT_VERT_SHADER;
+    pipelineNode->settings.fragmentShaderPath = fs::path(SHADER_DIR) / DEFAULT_FRAG_SHADER;
 
     // Default pipeline settings for basic rendering
     pipelineNode->settings.depthTest = true;

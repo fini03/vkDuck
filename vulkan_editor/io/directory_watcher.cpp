@@ -141,7 +141,7 @@ void DirectoryWatcher::handleFileAction(
         return;
     }
 
-    std::string fullPath = dir + filename;
+    std::string fullPath = (std::filesystem::path(dir) / filename).string();
 
     // Convert efsw action to our FileAction enum
     FileAction fileAction;

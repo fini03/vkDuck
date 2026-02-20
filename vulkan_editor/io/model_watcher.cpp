@@ -42,8 +42,8 @@ void ModelFileWatcher::watchFile(const std::string& filePath) {
     watchDirectory = path.parent_path().string();
 
     // Ensure the directory path ends with a separator for efsw
-    if (!watchDirectory.empty() && watchDirectory.back() != '/') {
-        watchDirectory += '/';
+    if (!watchDirectory.empty() && watchDirectory.back() != '/' && watchDirectory.back() != '\\') {
+        watchDirectory += std::filesystem::path::preferred_separator;
     }
 
     // Add watch on the directory containing the file
@@ -141,7 +141,7 @@ void ModelFileWatcher::handleFileAction(
         return;
     }
 
-    std::string fullPath = dir + filename;
+    std::string fullPath = (std::filesystem::path(dir) / filename).string();
 
     // Filter actions we care about
     switch (action) {

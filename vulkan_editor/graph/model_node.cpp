@@ -307,7 +307,7 @@ void ModelNode::loadModel(
     modelData.clear();
     gltfCameras.clear();
     selectedCameraIndex = -1;
-    defaultTexture = {.path = projRoot / "data/images/default.png"};
+    defaultTexture = {.path = projRoot / "data" / "images" / "default.png"};
 
     // Use vkDuck library's loadModel for all the heavy lifting
     // (GLTF parsing, SIMD index conversion, camera extraction, texture path resolution)
@@ -506,7 +506,7 @@ void ModelNode::createPrimitives(primitives::Store& store) {
         storeImage.viewInfo.subresourceRange.aspectMask =
             VK_IMAGE_ASPECT_COLOR_BIT;
         // Store original image path for code generation (wuffs loading)
-        storeImage.originalImagePath = image.path.string();
+        storeImage.originalImagePath = image.path.generic_string();
     }
 
     baseTextureArray = store.newArray();

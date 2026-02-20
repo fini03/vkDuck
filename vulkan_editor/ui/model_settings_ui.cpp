@@ -25,7 +25,7 @@ void ModelSettingsUI::Draw(ModelNode* modelNode, ShaderManager* shaderManager, N
         if (shaderManager->showModelPicker("##ModelPicker", currentModelPath)) {
             // Model was selected from dropdown - store relative path
             strncpy(
-                modelNode->settings.modelPath, currentModelPath.string().c_str(),
+                modelNode->settings.modelPath, currentModelPath.generic_string().c_str(),
                 sizeof(modelNode->settings.modelPath) - 1
             );
             modelNode->settings.modelPath[sizeof(modelNode->settings.modelPath) - 1] = '\0';

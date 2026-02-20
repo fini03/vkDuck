@@ -10,9 +10,41 @@
 #include <set>
 #include <sstream>
 
+#ifdef _WIN32
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#else
+#include <unistd.h>
+#include <climits>
+#endif
+
 using std::print;
 
 namespace {
+
+// Get the directory containing the editor executable, then go up one level
+// to get the editor project root (exe is at <root>/build/main.exe)
+std::filesystem::path getEditorRoot() {
+    namespace fs = std::filesystem;
+    fs::path exePath;
+
+#ifdef _WIN32
+    wchar_t buf[MAX_PATH];
+    GetModuleFileNameW(NULL, buf, MAX_PATH);
+    exePath = fs::path(buf);
+#elif defined(__APPLE__)
+    char buf[PATH_MAX];
+    uint32_t size = sizeof(buf);
+    _NSGetExecutablePath(buf, &size);
+    exePath = fs::canonical(buf);
+#else
+    exePath = fs::canonical("/proc/self/exe");
+#endif
+
+    // exe is at <editorRoot>/build/main.exe, so go up twice
+    return exePath.parent_path().parent_path();
+}
 
 // Sanitize a name for use as a C++ identifier (replace spaces with underscores, etc.)
 std::string sanitizeName(const std::string& name) {
@@ -248,7 +280,7 @@ void FileGenerator::generateProject(
 void FileGenerator::generateSDKLinks(const std::filesystem::path& projectRoot) {
     namespace fs = std::filesystem;
 
-    fs::path editorRoot = fs::current_path();
+    fs::path editorRoot = getEditorRoot();
     fs::path buildDir = editorRoot / "build";
     fs::path subprojectsDir = projectRoot / "subprojects";
     fs::path projectLib = projectRoot / "lib";
@@ -264,18 +296,32 @@ void FileGenerator::generateSDKLinks(const std::filesystem::path& projectRoot) {
     std::error_code ec;
 
     // === Determine platform-specific library name ===
-#ifdef _WIN32
-    const std::string libName = "vkDuck.lib";
-#else
-    const std::string libName = "libvkDuck.a";
-#endif
+    // On Windows, the library name depends on the compiler:
+    // MSVC produces vkDuck.lib, GCC/MinGW produces libvkDuck.a
+    std::string libName;
+    fs::path builtLib;
 
-    // === Link pre-compiled vkDuck library from build directory ===
-    fs::path builtLib = buildDir / "subprojects" / "vkDuck" / libName;
+#ifdef _WIN32
+    fs::path msvcLib = buildDir / "subprojects" / "vkDuck" / "vkDuck.lib";
+    fs::path gccLib = buildDir / "subprojects" / "vkDuck" / "libvkDuck.a";
+    if (fs::exists(msvcLib)) {
+        libName = "vkDuck.lib";
+        builtLib = msvcLib;
+    } else if (fs::exists(gccLib)) {
+        libName = "libvkDuck.a";
+        builtLib = gccLib;
+    } else {
+        Log::error("FileGenerator", "vkDuck library not built. Build the editor first with 'meson compile -C build'. Looked for {} and {}", msvcLib.string(), gccLib.string());
+        return;
+    }
+#else
+    libName = "libvkDuck.a";
+    builtLib = buildDir / "subprojects" / "vkDuck" / libName;
     if (!fs::exists(builtLib)) {
         Log::error("FileGenerator", "vkDuck library not built at {}. Build the editor first with 'meson compile -C build'", builtLib.string());
         return;
     }
+#endif
 
     fs::path libLink = projectLib / libName;
     if (fs::exists(libLink, ec) || fs::is_symlink(libLink)) {
@@ -385,7 +431,7 @@ void FileGenerator::generatePrimitives(
                 try {
                     std::filesystem::copy_file(srcPath, destPath,
                         std::filesystem::copy_options::overwrite_existing);
-                    img.originalImagePath = "data/images/" + imageFileName;
+                    img.originalImagePath = (std::filesystem::path("data") / "images" / imageFileName).generic_string();
                     Log::info("FileGenerator", "Copied image to: {}", destPath.string());
                 } catch (const std::filesystem::filesystem_error& e) {
                     Log::error("FileGenerator", "Failed to copy image {}: {}",
@@ -406,7 +452,7 @@ void FileGenerator::generatePrimitives(
             if (textureFile.is_open()) {
                 textureFile.write(reinterpret_cast<const char*>(img.imageData), img.imageSize);
                 textureFile.close();
-                img.imageDataBinPath = "data/textures/" + textureFileName;
+                img.imageDataBinPath = (std::filesystem::path("data") / "textures" / textureFileName).generic_string();
                 Log::info("FileGenerator", "Exported texture data to: {}", textureFilePath.string());
             }
         }
@@ -658,11 +704,18 @@ void FileGenerator::generateMesonBuild(const primitives::Store& store, const std
         "project('vulkan_renderer', 'cpp',\n"
         "  version : '1.0.0',\n"
         "  default_options : [\n"
-        "    'cpp_std=c++23',\n"
         "    'warning_level=0',\n"
         "    'buildtype=debugoptimized'\n"
         "  ]\n"
         ")\n\n"
+        "# MSVC does not implement a c++23 version yet\n"
+        "cpp = meson.get_compiler('cpp')\n"
+        "if cpp.get_id() == 'msvc'\n"
+        "  add_project_arguments('/std:c++23preview', language: 'cpp')\n"
+        "  add_project_link_arguments('/stack:16777216', language: 'cpp')\n"
+        "else\n"
+        "  add_project_arguments('-std=c++23', language: 'cpp')\n"
+        "endif\n\n"
         "# Dependencies (via Meson wraps)\n"
         "vulkan_dep = dependency('vulkan')\n"
         "sdl3_dep = dependency('sdl3')\n"
@@ -670,9 +723,8 @@ void FileGenerator::generateMesonBuild(const primitives::Store& store, const std
         "vma_dep = dependency('vulkan-memory-allocator', include_type: 'system')\n\n"
         "# Pre-compiled vkDuck library (built with Vulkan-Editor)\n"
         "vkDuck_inc = include_directories('include')\n"
-        "cpp = meson.get_compiler('cpp')\n"
         "vkDuck_lib = cpp.find_library('vkDuck',\n"
-        "  dirs: meson.current_source_dir() / 'lib',\n"
+        "  dirs: [meson.current_source_dir() / 'lib'],\n"
         "  static: true\n"
         ")\n\n"
         "# Combine vkDuck with its dependencies\n"
