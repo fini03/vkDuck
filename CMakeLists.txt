@@ -39,17 +39,18 @@ set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
 set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(SDL3)
 
-# GLM
-FetchContent_Declare(glm
+# GLM (header-only – bypass GLM's CMake which has issues)
+FetchContent_Declare(glm_fetch
     URL      https://github.com/g-truc/glm/archive/refs/tags/1.0.1.tar.gz
     URL_HASH SHA256=9f3174561fd26904b23f0db5e560971cbf9b3cbda0b280f04d5c379d03bf234c
 )
-FetchContent_MakeAvailable(glm)
-if(NOT TARGET glm::glm)
-    if(TARGET glm)
-        add_library(glm::glm ALIAS glm)
-    endif()
+FetchContent_GetProperties(glm_fetch)
+if(NOT glm_fetch_POPULATED)
+    FetchContent_Populate(glm_fetch)
 endif()
+add_library(glm INTERFACE)
+add_library(glm::glm ALIAS glm)
+target_include_directories(glm INTERFACE ${glm_fetch_SOURCE_DIR})
 
 # Vulkan Memory Allocator
 FetchContent_Declare(VulkanMemoryAllocator
@@ -104,13 +105,21 @@ target_include_directories(imgui PUBLIC
 )
 target_link_libraries(imgui PUBLIC Vulkan::Vulkan SDL3::SDL3)
 
-# ImGui Node Editor (static library)
+# ImGui Node Editor (static library – with patches from subprojects/packagefiles)
 FetchContent_Declare(imgui_node_editor_fetch
     URL https://github.com/thedmd/imgui-node-editor/archive/e78e447900909a051817a760efe13fe83e6e1afc.tar.gz
 )
 FetchContent_GetProperties(imgui_node_editor_fetch)
 if(NOT imgui_node_editor_fetch_POPULATED)
     FetchContent_Populate(imgui_node_editor_fetch)
+    # Apply patches from subprojects/packagefiles/imgui-node-editor/
+    set(IMGUI_NODE_EDITOR_PATCHES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/subprojects/packagefiles/imgui-node-editor")
+    file(COPY
+        "${IMGUI_NODE_EDITOR_PATCHES_DIR}/imgui_node_editor.cpp"
+        "${IMGUI_NODE_EDITOR_PATCHES_DIR}/imgui_bezier_math.inl"
+        "${IMGUI_NODE_EDITOR_PATCHES_DIR}/crude_json.cpp"
+        DESTINATION "${imgui_node_editor_fetch_SOURCE_DIR}"
+    )
 endif()
 add_library(imgui_node_editor STATIC
     ${imgui_node_editor_fetch_SOURCE_DIR}/imgui_node_editor.cpp
