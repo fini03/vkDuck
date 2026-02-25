@@ -98,6 +98,10 @@ public:
         NodeGraph& graph, ax::NodeEditor::PinId startId,
         ax::NodeEditor::PinId endId, bool logOnFailure = false
     );
+    static bool IsLinkValid(
+        NodeGraph& graph, ax::NodeEditor::PinId startId,
+        ax::NodeEditor::PinId endId
+    );
     static const char* GetPinTypeName(PinType type);
     static bool ArePinTypesCompatible(PinType outputType, PinType inputType);
 

@@ -152,6 +152,27 @@ bool LinkValidator::CanCreateLink(
     return true;
 }
 
+bool LinkValidator::IsLinkValid(
+    NodeGraph& graph,
+    ax::NodeEditor::PinId startId,
+    ax::NodeEditor::PinId endId
+) {
+    auto start = graph.findPin(startId);
+    auto end = graph.findPin(endId);
+
+    // Basic validation (pins exist, not self-loop, output→input direction)
+    if (!ValidateBasicLinkRequirements(start, end)) {
+        return false;
+    }
+
+    // Determine output and input pins
+    PinLookupResult output, input;
+    DetermineOutputInput(start, end, output, input);
+
+    // Type compatibility check (no logging, no single-link constraint)
+    return CheckTypeCompatibility(graph, output, input, false);
+}
+
 const char* LinkValidator::GetPinTypeName(PinType type) {
     switch (type) {
     case PinType::UniformBuffer:
@@ -371,14 +392,12 @@ void removeInvalidLinks(
     std::vector<Link>& links,
     PinToLinksIndex& pinToLinks
 ) {
-    // Collect links to remove (where either pin no longer exists)
+    // Collect links to remove (where pins don't exist or are no longer compatible)
     std::vector<ax::NodeEditor::LinkId> toRemove;
 
     for (const auto& link : links) {
-        auto startResult = graph.findPin(link.startPin);
-        auto endResult = graph.findPin(link.endPin);
-
-        if (!startResult.pin || !endResult.pin) {
+        // Full validation: checks existence, type compatibility, format compatibility
+        if (!LinkValidator::IsLinkValid(graph, link.startPin, link.endPin)) {
             toRemove.push_back(link.id);
         }
     }
