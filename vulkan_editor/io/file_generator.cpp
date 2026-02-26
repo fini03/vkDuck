@@ -270,9 +270,10 @@ void FileGenerator::generateProject(
     // Generate main.cpp in src/
     generateMain(srcDir);
 
-    // Link SDK and generate meson.build at project root
+    // Link SDK and generate build files at project root
     generateSDKLinks(projectRoot);
     generateMesonBuild(store, projectRoot);
+    generateCMakeBuild(store, projectRoot);
 
     Log::info("FileGenerator", "Project generated to: {}", projectRoot.string());
 }
@@ -763,6 +764,143 @@ void FileGenerator::generateMesonBuild(const primitives::Store& store, const std
         "  cpp_args : cpp_args,\n"
         "  install : true\n"
         ")\n"
+    );
+
+    Log::info("FileGenerator", "Generated: {}", outFile.string());
+}
+
+void FileGenerator::generateCMakeBuild(const primitives::Store& store, const std::filesystem::path& outputDir) {
+    auto outFile = outputDir / "CMakeLists.txt";
+    std::ofstream out(outFile, std::ios::trunc);
+    if (!out.is_open()) {
+        Log::error("FileGenerator", "Cannot create file: {}", outFile.string());
+        return;
+    }
+
+    bool hasCameras = hasMovableCameras(store);
+
+    print(out,
+        "cmake_minimum_required(VERSION 3.22)\n"
+        "project(vulkan_renderer VERSION 1.0.0 LANGUAGES CXX)\n\n"
+        "# Avoid DOWNLOAD_EXTRACT_TIMESTAMP warning on CMake 3.24+\n"
+        "if(POLICY CMP0135)\n"
+        "    cmake_policy(SET CMP0135 NEW)\n"
+        "endif()\n\n"
+        "# Allow FetchContent_Populate for libs without CMakeLists.txt (CMake 4.x compat)\n"
+        "if(POLICY CMP0169)\n"
+        "    cmake_policy(SET CMP0169 OLD)\n"
+        "endif()\n\n"
+        "# ── C++23 standard ────────────────────────────────────────────────────────────\n\n"
+        "set(CMAKE_CXX_STANDARD 23)\n"
+        "set(CMAKE_CXX_STANDARD_REQUIRED ON)\n"
+        "set(CMAKE_CXX_EXTENSIONS OFF)\n\n"
+        "# MSVC: 16MB stack size\n"
+        "if(MSVC)\n"
+        "    add_link_options(/STACK:16777216)\n"
+        "endif()\n\n"
+        "# Output all binaries to build/ directly (no Debug/Release subdirectories)\n"
+        "set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${{CMAKE_BINARY_DIR}})\n"
+        "set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${{CMAKE_BINARY_DIR}})\n"
+        "set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${{CMAKE_BINARY_DIR}})\n"
+        "set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${{CMAKE_BINARY_DIR}})\n"
+        "set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL ${{CMAKE_BINARY_DIR}})\n"
+        "set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${{CMAKE_BINARY_DIR}})\n"
+        "set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG ${{CMAKE_BINARY_DIR}})\n"
+        "set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE ${{CMAKE_BINARY_DIR}})\n"
+        "set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO ${{CMAKE_BINARY_DIR}})\n"
+        "set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_MINSIZEREL ${{CMAKE_BINARY_DIR}})\n"
+        "set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${{CMAKE_BINARY_DIR}})\n"
+        "set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${{CMAKE_BINARY_DIR}})\n"
+        "set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${{CMAKE_BINARY_DIR}})\n"
+        "set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELWITHDEBINFO ${{CMAKE_BINARY_DIR}})\n"
+        "set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_MINSIZEREL ${{CMAKE_BINARY_DIR}})\n\n"
+        "include(FetchContent)\n\n"
+        "# ── Dependencies ──────────────────────────────────────────────────────────────\n\n"
+        "# Vulkan (system)\n"
+        "find_package(Vulkan REQUIRED)\n\n"
+        "# SDL3\n"
+        "FetchContent_Declare(SDL3\n"
+        "    URL      https://github.com/libsdl-org/SDL/releases/download/release-3.2.10/SDL3-3.2.10.tar.gz\n"
+        "    URL_HASH SHA256=f87be7b4dec66db4098e9c167b2aa34e2ca10aeb5443bdde95ae03185ed513e0\n"
+        ")\n"
+        "set(SDL_TESTS OFF CACHE BOOL \"\" FORCE)\n"
+        "set(SDL_TEST_LIBRARY OFF CACHE BOOL \"\" FORCE)\n"
+        "set(SDL_EXAMPLES OFF CACHE BOOL \"\" FORCE)\n"
+        "FetchContent_MakeAvailable(SDL3)\n\n"
+        "# GLM (header-only)\n"
+        "FetchContent_Declare(glm_fetch\n"
+        "    URL      https://github.com/g-truc/glm/archive/refs/tags/1.0.1.tar.gz\n"
+        "    URL_HASH SHA256=9f3174561fd26904b23f0db5e560971cbf9b3cbda0b280f04d5c379d03bf234c\n"
+        ")\n"
+        "FetchContent_GetProperties(glm_fetch)\n"
+        "if(NOT glm_fetch_POPULATED)\n"
+        "    FetchContent_Populate(glm_fetch)\n"
+        "endif()\n"
+        "add_library(glm INTERFACE)\n"
+        "add_library(glm::glm ALIAS glm)\n"
+        "target_include_directories(glm INTERFACE ${{glm_fetch_SOURCE_DIR}})\n\n"
+        "# Vulkan Memory Allocator\n"
+        "FetchContent_Declare(VulkanMemoryAllocator\n"
+        "    URL https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/archive/e722e57c891a8fbe3cc73ca56c19dd76be242759.tar.gz\n"
+        ")\n"
+        "set(VMA_BUILD_DOCUMENTATION OFF CACHE BOOL \"\" FORCE)\n"
+        "set(VMA_BUILD_SAMPLES OFF CACHE BOOL \"\" FORCE)\n"
+        "FetchContent_MakeAvailable(VulkanMemoryAllocator)\n\n"
+        "# ── Pre-built vkDuck library ──────────────────────────────────────────────────\n\n"
+        "add_library(vkDuck STATIC IMPORTED)\n"
+        "if(MSVC)\n"
+        "    set_target_properties(vkDuck PROPERTIES\n"
+        "        IMPORTED_LOCATION \"${{CMAKE_CURRENT_SOURCE_DIR}}/lib/vkDuck.lib\"\n"
+        "    )\n"
+        "else()\n"
+        "    set_target_properties(vkDuck PROPERTIES\n"
+        "        IMPORTED_LOCATION \"${{CMAKE_CURRENT_SOURCE_DIR}}/lib/libvkDuck.a\"\n"
+        "    )\n"
+        "endif()\n"
+        "target_include_directories(vkDuck INTERFACE\n"
+        "    ${{CMAKE_CURRENT_SOURCE_DIR}}/include\n"
+        ")\n"
+        "target_link_libraries(vkDuck INTERFACE\n"
+        "    Vulkan::Vulkan\n"
+        "    SDL3::SDL3\n"
+        "    glm::glm\n"
+        ")\n"
+        "if(TARGET GPUOpen::VulkanMemoryAllocator)\n"
+        "    target_link_libraries(vkDuck INTERFACE GPUOpen::VulkanMemoryAllocator)\n"
+        "elseif(TARGET VulkanMemoryAllocator)\n"
+        "    target_link_libraries(vkDuck INTERFACE VulkanMemoryAllocator)\n"
+        "endif()\n\n"
+        "# ── Executable ────────────────────────────────────────────────────────────────\n\n"
+        "add_executable(main\n"
+        "    src/main.cpp\n"
+        "    generated_files/primitives.cpp"
+    );
+
+    if (hasCameras) {
+        print(out, "\n    generated_files/camera_instances.cpp");
+    }
+
+    print(out,
+        "\n)\n\n"
+        "target_include_directories(main PRIVATE\n"
+        "    ${{CMAKE_CURRENT_SOURCE_DIR}}/generated_files\n"
+        ")\n\n"
+        "target_compile_definitions(main PRIVATE VKDUCK_NO_VMA_IMPLEMENTATION)\n\n"
+        "# Platform-specific Vulkan surface defines\n"
+        "if(WIN32)\n"
+        "    target_compile_definitions(main PRIVATE VK_USE_PLATFORM_WIN32_KHR)\n"
+        "elseif(APPLE)\n"
+        "    target_compile_definitions(main PRIVATE VK_USE_PLATFORM_MACOS_MVK)\n"
+        "elseif(UNIX)\n"
+        "    target_compile_definitions(main PRIVATE VK_USE_PLATFORM_XCB_KHR)\n"
+        "endif()\n\n"
+        "target_link_libraries(main PRIVATE vkDuck)\n\n"
+        "# Windows: copy SDL3 DLL next to executable\n"
+        "if(WIN32)\n"
+        "    add_custom_command(TARGET main POST_BUILD\n"
+        "        COMMAND ${{CMAKE_COMMAND}} -E copy_if_different \"$<TARGET_FILE:SDL3::SDL3>\" \"$<TARGET_FILE_DIR:main>\"\n"
+        "    )\n"
+        "endif()\n"
     );
 
     Log::info("FileGenerator", "Generated: {}", outFile.string());

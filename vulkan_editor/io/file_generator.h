@@ -34,6 +34,7 @@ private:
     void generatePrimitives(NodeGraph& graph, primitives::Store& store, const std::filesystem::path& outputDir);
     void generateRenderer(const primitives::Store& store, const std::filesystem::path& outputDir);
     void generateMesonBuild(const primitives::Store& store, const std::filesystem::path& outputDir);
+    void generateCMakeBuild(const primitives::Store& store, const std::filesystem::path& outputDir);
     void generateMain(const std::filesystem::path& outputDir);
     void generateShaders(const primitives::Store& store, const std::filesystem::path& outputDir);
 
