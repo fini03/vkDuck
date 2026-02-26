@@ -42,6 +42,16 @@ add_library(vkDuck STATIC
     src/image_loader.cpp
 )
 
+# Output to build/subprojects/vkDuck/ to match Meson structure
+# (file_generator.cpp expects this path for generated projects)
+set_target_properties(vkDuck PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/subprojects/vkDuck"
+    ARCHIVE_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/subprojects/vkDuck"
+    ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/subprojects/vkDuck"
+    ARCHIVE_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/subprojects/vkDuck"
+    ARCHIVE_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_BINARY_DIR}/subprojects/vkDuck"
+)
+
 target_include_directories(vkDuck
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
