@@ -22,6 +22,18 @@ if(MSVC)
     add_link_options(/STACK:16777216)
 endif()
 
+# Output all binaries to build/ directly (no Debug/Release subdirectories)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_BINARY_DIR})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL ${CMAKE_BINARY_DIR})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_BINARY_DIR})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_MINSIZEREL ${CMAKE_BINARY_DIR})
+
 include(FetchContent)
 
 # ── Dependencies (all fetched automatically – no meson required) ─────────────
@@ -246,8 +258,9 @@ target_link_libraries(vkDuckEditor PRIVATE
     nlohmann_json
     shader_slang
     vkDuck
-    efsw
 )
+
+target_link_libraries(vkDuckEditor PRIVATE efsw)
 
 # VMA - handle different target names across VMA versions
 if(TARGET GPUOpen::VulkanMemoryAllocator)
@@ -263,12 +276,25 @@ if(APPLE)
     target_link_libraries(vkDuckEditor PRIVATE ${COREFOUNDATION_LIBRARY} ${CORESERVICES_LIBRARY})
 endif()
 
-# Windows: copy shader-slang runtime DLLs next to executable
-if(WIN32 AND EXISTS "${SLANG_DIR}/bin")
-    file(GLOB SLANG_DLLS "${SLANG_DIR}/bin/*.dll")
-    foreach(DLL ${SLANG_DLLS})
-        add_custom_command(TARGET vkDuckEditor POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DLL}" "$<TARGET_FILE_DIR:vkDuckEditor>"
-        )
-    endforeach()
+# Windows: copy all required DLLs next to executable
+if(WIN32)
+    # Copy SDL3 DLL
+    add_custom_command(TARGET vkDuckEditor POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:SDL3::SDL3>" "$<TARGET_FILE_DIR:vkDuckEditor>"
+    )
+
+    # Copy efsw DLL
+    add_custom_command(TARGET vkDuckEditor POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:efsw>" "$<TARGET_FILE_DIR:vkDuckEditor>"
+    )
+
+    # Copy shader-slang DLLs
+    if(EXISTS "${SLANG_DIR}/bin")
+        file(GLOB SLANG_DLLS "${SLANG_DIR}/bin/*.dll")
+        foreach(DLL ${SLANG_DLLS})
+            add_custom_command(TARGET vkDuckEditor POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DLL}" "$<TARGET_FILE_DIR:vkDuckEditor>"
+            )
+        endforeach()
+    endif()
 endif()
