@@ -207,6 +207,8 @@ add_executable(vkDuckEditor
     vulkan_editor/graph/fixed_camera_node.cpp
     vulkan_editor/graph/fps_camera_node.cpp
     vulkan_editor/graph/default_renderer.cpp
+	vulkan_editor/graph/pin_registry.cpp
+	vulkan_editor/graph/validation_rules.cpp
 
     # Shader management
     vulkan_editor/shader/shader_manager.cpp

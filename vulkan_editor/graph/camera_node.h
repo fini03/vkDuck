@@ -1,5 +1,6 @@
 #pragma once
 #include "node.h"
+#include "pin_registry.h"
 #include "vulkan_editor/io/serialization.h"
 #include "vulkan_editor/gpu/primitives.h"
 #include <glm/glm.hpp>
@@ -38,6 +39,10 @@ public:
 
     nlohmann::json toJson() const override;
     void fromJson(const nlohmann::json& j) override;
+
+    // Pin registration (new system)
+    void registerPins(PinRegistry& registry) override;
+    bool usesPinRegistry() const override { return usesRegistry; }
 
     // Camera controller from vkDuck library (handles all camera math)
     CameraController controller;
@@ -82,9 +87,14 @@ public:
     glm::vec3 getUp() const { return controller.up; }
     void setUp(const glm::vec3& u) { controller.up = u; }
 
+    // Legacy pin (kept for backwards compatibility)
     Pin cameraPin;
 
+    // New registry handle
+    PinHandle cameraPinHandle = INVALID_PIN_HANDLE;
+
 protected:
+    bool usesRegistry = false;
     // Initial state for reset functionality
     glm::vec3 initialPosition{0.0f, 0.0f, 5.0f};
     glm::vec3 initialTarget{0.0f, 0.0f, 0.0f};

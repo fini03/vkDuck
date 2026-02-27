@@ -52,6 +52,18 @@ void CameraNodeBase::createDefaultPins() {
     cameraPin.label = "Camera";
 }
 
+void CameraNodeBase::registerPins(PinRegistry& registry) {
+    // Register the camera output pin
+    cameraPinHandle = registry.registerPinWithId(
+        id,
+        cameraPin.id,  // Use existing ID for backwards compatibility
+        cameraPin.type,
+        PinKind::Output,
+        cameraPin.label
+    );
+    usesRegistry = true;
+}
+
 void CameraNodeBase::updateMatrices() {
     // Use library's CameraController to compute matrices
     cameraData = controller.getCameraData();

@@ -141,6 +141,88 @@ void PipelineNode::createDefaultPins() {
     }
 }
 
+void PipelineNode::registerPins(PinRegistry& registry) {
+    // Register vertex data input pin if it exists
+    if (vertexDataPin.id.Get() != 0) {
+        vertexDataPinHandle = registry.registerPinWithId(
+            id,
+            vertexDataPin.id,
+            vertexDataPin.type,
+            PinKind::Input,
+            vertexDataPin.label
+        );
+    }
+
+    // Register input binding pins
+    for (auto& binding : inputBindings) {
+        if (binding.pin.id.Get() != 0) {
+            binding.pinHandle = registry.registerPinWithId(
+                id,
+                binding.pin.id,
+                binding.pin.type,
+                PinKind::Input,
+                binding.pin.label
+            );
+        }
+    }
+
+    // Register output attachment pins
+    for (auto& config : shaderReflection.attachmentConfigs) {
+        if (config.pin.id.Get() != 0) {
+            config.pinHandle = registry.registerPinWithId(
+                id,
+                config.pin.id,
+                config.pin.type,
+                PinKind::Output,
+                config.pin.label
+            );
+        }
+    }
+
+    // Register camera input pin if detected
+    if (hasCameraInput && cameraInput.pin.id.Get() != 0) {
+        cameraInput.pinHandle = registry.registerPinWithId(
+            id,
+            cameraInput.pin.id,
+            cameraInput.pin.type,
+            PinKind::Input,
+            cameraInput.pin.label
+        );
+    }
+
+    // Register light input pin if detected
+    if (hasLightInput && lightInput.pin.id.Get() != 0) {
+        lightInput.pinHandle = registry.registerPinWithId(
+            id,
+            lightInput.pin.id,
+            lightInput.pin.type,
+            PinKind::Input,
+            lightInput.pin.label
+        );
+    }
+
+    usesRegistry = true;
+}
+
+void PipelineNode::reregisterPins(PinRegistry& registry) {
+    // Unregister all existing pins for this node
+    registry.unregisterPinsForNode(id);
+
+    // Reset all handles
+    vertexDataPinHandle = INVALID_PIN_HANDLE;
+    for (auto& binding : inputBindings) {
+        binding.pinHandle = INVALID_PIN_HANDLE;
+    }
+    for (auto& config : shaderReflection.attachmentConfigs) {
+        config.pinHandle = INVALID_PIN_HANDLE;
+    }
+    cameraInput.pinHandle = INVALID_PIN_HANDLE;
+    lightInput.pinHandle = INVALID_PIN_HANDLE;
+
+    // Re-register all pins
+    registerPins(registry);
+}
+
 PipelineNode::~PipelineNode() {}
 
 nlohmann::json PipelineNode::toJson() const {
@@ -1088,6 +1170,10 @@ bool PipelineNode::updateShaderReflection(
     // pin IDs that reconcilePins() needs to preserve for existing node
     // connections
     reconcilePins(shaderReflection.bindings, graph);
+
+    // Update pin registry with new/changed pins
+    // This must happen after reconcilePins() updates the Pin objects
+    reregisterPins(graph.pinRegistry);
 
     // Sync connected LightNode's count when shader is updated
     if (hasLightInput && lightInput.arraySize > 0) {

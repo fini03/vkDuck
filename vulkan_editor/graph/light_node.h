@@ -1,5 +1,6 @@
 #pragma once
 #include "node.h"
+#include "pin_registry.h"
 #include "vulkan_editor/io/serialization.h"
 #include "vulkan_editor/gpu/primitives.h"
 #include <glm/glm.hpp>
@@ -34,6 +35,10 @@ public:
     nlohmann::json toJson() const override;
     void fromJson(const nlohmann::json& j) override;
 
+    // Pin registration (new system)
+    void registerPins(PinRegistry& registry) override;
+    bool usesPinRegistry() const override { return usesRegistry; }
+
     void ensureLightCount();
 
     // Light array configuration
@@ -44,12 +49,16 @@ public:
     // read-only
     bool shaderControlledCount{false};
 
-    // Public pin for node graph connections
+    // Legacy pin (kept for backwards compatibility)
     Pin lightArrayPin;
+
+    // New registry handle
+    PinHandle lightArrayPinHandle = INVALID_PIN_HANDLE;
 
 private:
     void createDefaultPins();
     primitives::UniformBuffer* lightUbo{nullptr};
     primitives::Light* lightPrimitive{nullptr};
     primitives::StoreHandle lightUboArray{};
+    bool usesRegistry = false;
 };

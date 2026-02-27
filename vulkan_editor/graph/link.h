@@ -1,25 +1,29 @@
 #pragma once
 
 #include "../shader/shader_types.h"
+#include "pin_id_hash.h"  // Hash specializations for PinId/LinkId
 #include <algorithm>
 #include <functional>
-#include <imgui_node_editor.h>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 #include <vulkan/vulkan.h>
 
 using namespace ShaderTypes;
-namespace ed = ax::NodeEditor;
 
 class Node;
 class NodeGraph;
 class PipelineNode;
 
+// ============================================================================
+// Core Types
+// ============================================================================
+
 struct Link {
-    ax::NodeEditor::LinkId id;
-    ax::NodeEditor::PinId startPin;
-    ax::NodeEditor::PinId endPin;
+    ed::LinkId id;
+    ed::PinId startPin;  // Always output pin
+    ed::PinId endPin;    // Always input pin
 };
 
 enum class NodePinKind { Input, Output, None };
@@ -30,131 +34,91 @@ struct PinLookupResult {
     NodePinKind kind = NodePinKind::None;
 };
 
-namespace std {
-template <>
-struct hash<ax::NodeEditor::PinId> {
-    std::size_t
-    operator()(const ax::NodeEditor::PinId& id) const noexcept {
-        return std::hash<void*>()(
-            reinterpret_cast<void*>(id.AsPointer())
-        );
-    }
-};
+using PinToLinksIndex =
+    std::unordered_map<ed::PinId, std::unordered_set<ed::LinkId>>;
 
-template <>
-struct equal_to<ax::NodeEditor::PinId> {
-    bool operator()(
-        const ax::NodeEditor::PinId& lhs,
-        const ax::NodeEditor::PinId& rhs
-    ) const noexcept {
-        return lhs == rhs;
-    }
-};
+// ============================================================================
+// Validation Result - carries success/failure with reason
+// ============================================================================
 
-template <>
-struct hash<ax::NodeEditor::LinkId> {
-    std::size_t
-    operator()(const ax::NodeEditor::LinkId& id) const noexcept {
-        return std::hash<void*>()(
-            reinterpret_cast<void*>(id.AsPointer())
-        );
-    }
-};
-
-template <>
-struct equal_to<ax::NodeEditor::LinkId> {
-    bool operator()(
-        const ax::NodeEditor::LinkId& lhs,
-        const ax::NodeEditor::LinkId& rhs
-    ) const noexcept {
-        return lhs == rhs;
-    }
-};
-}
-
-using PinToLinksIndex = std::unordered_map<
-    ax::NodeEditor::PinId,
-    std::unordered_set<ax::NodeEditor::LinkId>>;
-
-struct FormatCompatibilityInfo {
-    bool compatible = false;
+struct ValidationResult {
+    bool valid = false;
     std::string reason;
+
+    // Implicit conversion to bool for if(result) checks
+    operator bool() const { return valid; }
+
+    // Factory methods for clarity
+    static ValidationResult Ok() { return {true, ""}; }
+    static ValidationResult Fail(std::string reason) {
+        return {false, std::move(reason)};
+    }
 };
 
-/**
- * @class LinkValidator
- * @brief Validates pin compatibility and format constraints for node connections.
- */
-class LinkValidator {
-public:
-    static AttachmentConfig* FindAttachmentForPin(
-        PipelineNode* node, ax::NodeEditor::PinId pinId, NodeGraph& graph
-    );
-    static FormatCompatibilityInfo CanInputAcceptFormat(
-        PipelineNode* inputNode, ax::NodeEditor::PinId inputPinId,
-        VkFormat outputFormat, NodeGraph& graph
-    );
-    static bool CanCreateLink(
-        NodeGraph& graph, ax::NodeEditor::PinId startId,
-        ax::NodeEditor::PinId endId, bool logOnFailure = false
-    );
-    static bool IsLinkValid(
-        NodeGraph& graph, ax::NodeEditor::PinId startId,
-        ax::NodeEditor::PinId endId
-    );
-    static const char* GetPinTypeName(PinType type);
-    static bool ArePinTypesCompatible(PinType outputType, PinType inputType);
+// ============================================================================
+// Pin Pair - normalized output→input pair
+// ============================================================================
 
-private:
-    static const Pin* FindPinInList(
-        const std::vector<Pin>& pins,
-        ax::NodeEditor::PinId pinId
-    );
+struct PinPair {
+    PinLookupResult output;
+    PinLookupResult input;
 
-    static ShaderTypes::AttachmentConfig* FindMatchingAttachment(
-        PipelineNode* node,
-        const std::string& pinLabel
-    );
-
-    static FormatCompatibilityInfo CheckFormatCompatibility(
-        const Pin* pin,
-        VkFormat outputFormat
-    );
-
-    static bool ValidateBasicLinkRequirements(
-        const PinLookupResult& start,
-        const PinLookupResult& end
-    );
-
-    static void DetermineOutputInput(
-        const PinLookupResult& start,
-        const PinLookupResult& end,
-        PinLookupResult& output,
-        PinLookupResult& input
-    );
-
-    static bool CheckTypeCompatibility(
-        NodeGraph& graph,
-        const PinLookupResult& output,
-        const PinLookupResult& input,
-        bool logOnFailure
-    );
-
-    static bool CheckAttachmentFormatCompatibility(
-        NodeGraph& graph,
-        PipelineNode* outputPipeline,
-        PipelineNode* inputPipeline,
-        const PinLookupResult& output,
-        const PinLookupResult& input,
-        bool logOnFailure
+    // Creates a normalized pin pair (output→input) from any two pins.
+    // Returns nullopt if:
+    // - Either pin doesn't exist
+    // - Pins are on the same node
+    // - Pins are both inputs or both outputs
+    static std::optional<PinPair> create(
+        NodeGraph& graph, ed::PinId a, ed::PinId b
     );
 };
+
+// ============================================================================
+// Link Validation - clean public API
+// ============================================================================
+
+namespace LinkValidator {
+
+// Check if an existing link is still valid (type + format compatibility).
+// Use this when validating links after shader changes.
+ValidationResult validate(NodeGraph& graph, ed::PinId startId, ed::PinId endId);
+
+// Check if a new link can be created (validate + single-link constraint).
+// Use this when user attempts to create a new connection.
+ValidationResult canCreate(NodeGraph& graph, ed::PinId startId, ed::PinId endId);
+
+// Check if two pin types are compatible for connection.
+bool arePinTypesCompatible(PinType outputType, PinType inputType);
+
+// Human-readable name for a pin type.
+const char* pinTypeName(PinType type);
+
+}  // namespace LinkValidator
+
+// ============================================================================
+// Link Storage Management
+// ============================================================================
 
 namespace LinkManager {
-void addLink(std::vector<Link>& links, PinToLinksIndex& pinToLinks, const Link& link);
-void removeLink(std::vector<Link>& links, PinToLinksIndex& pinToLinks, ax::NodeEditor::LinkId id);
-void removeLinksForPin(std::vector<Link>& links, PinToLinksIndex& pinToLinks, ax::NodeEditor::PinId pinId);
-bool isPinLinked(const PinToLinksIndex& pinToLinks, ax::NodeEditor::PinId id);
-void removeInvalidLinks(NodeGraph& graph, std::vector<Link>& links, PinToLinksIndex& pinToLinks);
+
+void addLink(
+    std::vector<Link>& links, PinToLinksIndex& pinToLinks, const Link& link
+);
+
+void removeLink(
+    std::vector<Link>& links, PinToLinksIndex& pinToLinks, ed::LinkId id
+);
+
+void removeLinksForPin(
+    std::vector<Link>& links, PinToLinksIndex& pinToLinks, ed::PinId pinId
+);
+
+bool isPinLinked(const PinToLinksIndex& pinToLinks, ed::PinId id);
+
+void removeInvalidLinks(
+    NodeGraph& graph, std::vector<Link>& links, PinToLinksIndex& pinToLinks
+);
+
 void clearLinks(std::vector<Link>& links, PinToLinksIndex& pinToLinks);
-}
+
+}  // namespace LinkManager

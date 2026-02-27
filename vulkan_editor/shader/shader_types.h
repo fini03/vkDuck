@@ -10,6 +10,11 @@
 #include <vector>
 #include <vulkan/vulkan.h>
 
+// PinHandle type - also defined in pin_registry.h (must match)
+// Using inline to allow multiple definitions
+using PinHandle = uint32_t;
+inline constexpr PinHandle INVALID_PIN_HANDLE = UINT32_MAX;
+
 /**
  * @namespace ShaderTypes
  * @brief Common type definitions shared between shader reflection and the node system.
@@ -74,6 +79,7 @@ struct AttachmentConfig : public ISerializable {
 
     primitives::StoreHandle handle;
     Pin pin;
+    PinHandle pinHandle = INVALID_PIN_HANDLE;
 
     AttachmentConfig()
         : format(VK_FORMAT_R8G8B8A8_UNORM) {
@@ -303,6 +309,7 @@ struct BindingInfo {
     bool isOutput = false;
     primitives::LinkSlot descriptorSetSlot;
     Pin pin;
+    PinHandle pinHandle = INVALID_PIN_HANDLE;
 };
 
 struct ShaderParsedResult {

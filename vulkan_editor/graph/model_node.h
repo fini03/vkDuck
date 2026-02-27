@@ -1,6 +1,7 @@
 #pragma once
 #include "../io/model_watcher.h"
 #include "node.h"
+#include "pin_registry.h"
 #include "vulkan/vulkan.h"
 #include "vulkan_editor/io/serialization.h"
 #include <filesystem>
@@ -158,15 +159,26 @@ public:
     nlohmann::json toJson() const override;
     void fromJson(const nlohmann::json& j) override;
 
+    // Pin registration (new system)
+    void registerPins(PinRegistry& registry) override;
+    bool usesPinRegistry() const override { return usesRegistry; }
+
     void loadModel(const std::filesystem::path& path, const std::filesystem::path& projectRoot = "");
 
     static const std::vector<const char*> topologyOptions;
     ModelSettings settings;
 
+    // Legacy pins (kept for backwards compatibility)
     Pin modelMatrixPin;
     Pin texturePin;
     Pin vertexDataPin;
     Pin cameraPin;
+
+    // New registry handles
+    PinHandle modelMatrixPinHandle = INVALID_PIN_HANDLE;
+    PinHandle texturePinHandle = INVALID_PIN_HANDLE;
+    PinHandle vertexDataPinHandle = INVALID_PIN_HANDLE;
+    PinHandle cameraPinHandle = INVALID_PIN_HANDLE;
 
     std::vector<EditorMaterial> materials;
     std::vector<EditorImage> images;
@@ -201,6 +213,7 @@ public:
 
 private:
     void createDefaultPins();
+    bool usesRegistry = false;
 
     EditorImage defaultTexture{};
 

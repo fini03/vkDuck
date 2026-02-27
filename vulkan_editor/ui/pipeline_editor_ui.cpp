@@ -234,23 +234,23 @@ void PipelineEditorUI::HandleLinkCreation() {
 
     ed::PinId startId = 0, endId = 0;
     if (ed::QueryNewLink(&startId, &endId)) {
-        // Check without logging during hover - use LinkValidator from links module
-        if (LinkValidator::CanCreateLink(graph, startId, endId)) {
-            // Make sure that we always create links in the
-            // direction of output -> input so that we don't need to
-            // swap it later.
-            auto start = graph.findPin(startId);
-            if (start.kind != NodePinKind::Output)
-                std::swap(startId, endId);
+        auto result = LinkValidator::canCreate(graph, startId, endId);
+        if (result) {
+            // Normalize to output→input direction using PinPair
+            auto pins = PinPair::create(graph, startId, endId);
+            if (pins) {
+                startId = pins->output.pin->id;
+                endId = pins->input.pin->id;
+            }
 
             if (ed::AcceptNewItem(ImColor(128, 255, 128), 4.0f))
                 CreateNewLink(startId, endId);
         } else {
             ed::RejectNewItem(ImColor(255, 128, 128), LINK_THICKNESS);
             ShowIncompatiblePinsTooltip();
-            // Only log when the user actually tries to drop (releases mouse)
-            if (ImGui::IsMouseReleased(0)) {
-                LinkValidator::CanCreateLink(graph, startId, endId, true);
+            // Log failure reason on mouse release
+            if (ImGui::IsMouseReleased(0) && !result.reason.empty()) {
+                Log::warning("Node Editor", "{}", result.reason);
             }
         }
     }

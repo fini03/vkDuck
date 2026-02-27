@@ -51,6 +51,8 @@ editor_files = files(
   'vulkan_editor/graph/node.cpp',
   'vulkan_editor/graph/node_graph.cpp',
   'vulkan_editor/graph/link.cpp',
+  'vulkan_editor/graph/pin_registry.cpp',
+  'vulkan_editor/graph/validation_rules.cpp',
   'vulkan_editor/graph/pipeline_node.cpp',
   'vulkan_editor/graph/model_node.cpp',
   'vulkan_editor/graph/present_node.cpp',

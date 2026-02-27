@@ -1,4 +1,5 @@
 #include "node.h"
+#include "pin_registry.h"
 #include "external/utilities/builders.h"
 #include "external/utilities/widgets.h"
 #include <imgui.h>
@@ -107,4 +108,8 @@ void Node::DrawPinIcon(
         ),
         iconType, connected, color, ImColor(32, 32, 32, alpha)
     );
+}
+
+void Node::unregisterPins(PinRegistry& registry) {
+    registry.unregisterPinsForNode(id);
 }

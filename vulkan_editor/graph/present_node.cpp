@@ -103,6 +103,18 @@ void PresentNode::createDefaultPins() {
     imagePin.label = "Presentation Image";
 }
 
+void PresentNode::registerPins(PinRegistry& registry) {
+    // Register the image input pin
+    imagePinHandle = registry.registerPinWithId(
+        id,
+        imagePin.id,  // Use existing ID for backwards compatibility
+        imagePin.type,
+        PinKind::Input,
+        imagePin.label
+    );
+    usesRegistry = true;
+}
+
 void PresentNode::clearPrimitives() {
     present = {};
 }

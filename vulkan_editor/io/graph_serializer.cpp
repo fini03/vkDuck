@@ -457,6 +457,15 @@ bool PipelineState::load(
             // Pass maxId for backwards compatibility, but it's already set
             int loadMaxId = maxId;
             deserializeNodes(j["nodes"], graph, shader_manager, loadMaxId);
+
+            // Register all nodes' pins with the central registry
+            Log::debug(
+                "PipelineState", "Registering pins for {} nodes...",
+                graph.nodes.size()
+            );
+            for (auto& node : graph.nodes) {
+                node->registerPins(graph.pinRegistry);
+            }
         }
 
         if (j.contains("links")) {

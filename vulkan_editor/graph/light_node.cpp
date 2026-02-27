@@ -121,6 +121,18 @@ void LightNode::createDefaultPins() {
     lightArrayPin.label = "light";
 }
 
+void LightNode::registerPins(PinRegistry& registry) {
+    // Register the light array output pin
+    lightArrayPinHandle = registry.registerPinWithId(
+        id,
+        lightArrayPin.id,  // Use existing ID for backwards compatibility
+        lightArrayPin.type,
+        PinKind::Output,
+        lightArrayPin.label
+    );
+    usesRegistry = true;
+}
+
 void LightNode::ensureLightCount() {
     if (lights.size() != static_cast<size_t>(numLights)) {
         lights.resize(numLights);

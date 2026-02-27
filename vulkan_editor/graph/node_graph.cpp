@@ -9,11 +9,37 @@
 #include <iostream>
 #include <stdexcept>
 
-// --- Node management
-// ---------------------------------------------------------
+// ============================================================================
+// Construction / Initialization
+// ============================================================================
+
+NodeGraph::NodeGraph() {
+    initializeValidation();
+}
+
+void NodeGraph::initializeValidation() {
+    validationChain.clear();
+    validationChain.addRule<TypeCompatibilityRule>();
+    // Note: SingleInputLinkRule is checked separately in canCreateLink()
+    // since it needs special handling for existing links
+    validationChain.addRule<ImageFormatRule>(GetAllowedImageFormats());
+    validationChain.addRule<PipelineFormatRule>();
+}
+
+// ============================================================================
+// Pin Lookup
+// ============================================================================
 
 bool NodeGraph::isPinLinked(ax::NodeEditor::PinId id) const {
     return LinkManager::isPinLinked(pinToLinks, id);
+}
+
+const PinEntry* NodeGraph::findPinEntry(ax::NodeEditor::PinId id) const {
+    return pinRegistry.findByEditorId(id);
+}
+
+PinEntry* NodeGraph::findPinEntry(ax::NodeEditor::PinId id) {
+    return pinRegistry.findByEditorId(id);
 }
 
 // Helper to find a pin and its parent node
@@ -292,4 +318,112 @@ void NodeGraph::clear() {
     nodes.clear();
     LinkManager::clearLinks(links, pinToLinks);
     dependencyGraph.clear();
+    pinRegistry.clear();
+}
+
+// ============================================================================
+// Link Validation (using the new chain)
+// ============================================================================
+
+ValidationResult NodeGraph::validateLink(
+    ax::NodeEditor::PinId startId, ax::NodeEditor::PinId endId
+) {
+    // First try registry-based lookup
+    const PinEntry* startEntry = findPinEntry(startId);
+    const PinEntry* endEntry = findPinEntry(endId);
+
+    // If both pins are in the registry, use the new validation path
+    if (startEntry && endEntry) {
+        // Find owning nodes
+        Node* startNode = nullptr;
+        Node* endNode = nullptr;
+        for (const auto& n : nodes) {
+            if (n->getId() == startEntry->ownerNodeId) startNode = n.get();
+            if (n->getId() == endEntry->ownerNodeId) endNode = n.get();
+        }
+
+        if (!startNode || !endNode) {
+            return ValidationResult::Fail("Node not found");
+        }
+
+        // Normalize to output -> input
+        const PinEntry* outputPin;
+        const PinEntry* inputPin;
+        Node* outputNode;
+        Node* inputNode;
+
+        if (startEntry->kind == PinKind::Output) {
+            outputPin = startEntry;
+            inputPin = endEntry;
+            outputNode = startNode;
+            inputNode = endNode;
+        } else {
+            outputPin = endEntry;
+            inputPin = startEntry;
+            outputNode = endNode;
+            inputNode = startNode;
+        }
+
+        // Same node check
+        if (outputNode == inputNode) {
+            return ValidationResult::Fail("Cannot connect to same node");
+        }
+
+        // Must be output -> input
+        if (outputPin->kind != PinKind::Output ||
+            inputPin->kind != PinKind::Input) {
+            return ValidationResult::Fail("Must connect output to input");
+        }
+
+        ValidationContext ctx{this, outputPin, inputPin, outputNode, inputNode};
+        return validationChain.validate(ctx);
+    }
+
+    // Fall back to legacy validation
+    return LinkValidator::validate(*this, startId, endId);
+}
+
+ValidationResult NodeGraph::canCreateLink(
+    ax::NodeEditor::PinId startId, ax::NodeEditor::PinId endId
+) {
+    // First check if link would be valid
+    auto result = validateLink(startId, endId);
+    if (!result) {
+        return result;
+    }
+
+    // Check single input link constraint
+    // Determine which pin is the input
+    const PinEntry* startEntry = findPinEntry(startId);
+    const PinEntry* endEntry = findPinEntry(endId);
+
+    ax::NodeEditor::PinId inputPinId;
+    std::string inputLabel;
+
+    if (startEntry && endEntry) {
+        // Both in registry
+        if (startEntry->kind == PinKind::Input) {
+            inputPinId = startEntry->id;
+            inputLabel = startEntry->label;
+        } else {
+            inputPinId = endEntry->id;
+            inputLabel = endEntry->label;
+        }
+    } else {
+        // Fall back to legacy check
+        auto pins = PinPair::create(*this, startId, endId);
+        if (!pins) {
+            return ValidationResult::Fail("Invalid pins");
+        }
+        inputPinId = pins->input.pin->id;
+        inputLabel = pins->input.pin->label;
+    }
+
+    if (isPinLinked(inputPinId)) {
+        return ValidationResult::Fail(
+            "Input pin '" + inputLabel + "' is already linked"
+        );
+    }
+
+    return ValidationResult::Ok();
 }

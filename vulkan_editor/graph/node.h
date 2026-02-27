@@ -20,8 +20,12 @@ struct BlueprintNodeBuilder;
 
 class TemplateLoader;
 class NodeGraph;
+class PinRegistry;
 struct ResourceHandle;
 struct Link;
+struct PinEntry;
+enum class PinKind;
+using PinHandle = uint32_t;
 
 using ShaderTypes::BindingInfo;
 using ShaderTypes::MemberInfo;
@@ -76,6 +80,27 @@ public:
             ax::NodeEditor::PinId,
             primitives::LinkSlot>>& inputs
     ) const {}
+
+    /**
+     * Register this node's pins with the central registry.
+     * Called when node is added to the graph.
+     * Default implementation does nothing (for backwards compatibility).
+     * Override this to use the new pin registry system.
+     */
+    virtual void registerPins(PinRegistry& registry) {}
+
+    /**
+     * Unregister this node's pins from the registry.
+     * Called when node is removed from the graph.
+     * Default delegates to registry's unregisterPinsForNode().
+     */
+    virtual void unregisterPins(PinRegistry& registry);
+
+    /**
+     * Check if this node uses the new pin registry system.
+     * Returns true if pins are registered in the registry.
+     */
+    virtual bool usesPinRegistry() const { return false; }
 
     static int GetNextGlobalId() {
         return ++s_GlobalIdCounter;

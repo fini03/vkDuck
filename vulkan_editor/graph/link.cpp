@@ -1,186 +1,138 @@
-// links.cpp
-// Consolidated links management implementation
+// link.cpp
+// Consolidated link validation and management
+//
+// Note: NodeGraph::validateLink()/canCreateLink() use the new validation chain
+// for pins in the registry. LinkValidator provides fallback validation for
+// legacy pins not yet migrated to the registry.
+
 #include "link.h"
 #include "../util/logger.h"
-#include "../ui/attachment_editor_ui.h"
 #include "node_graph.h"
 #include "pipeline_node.h"
+#include "validation_rules.h"  // For GetAllowedImageFormats()
 #include <algorithm>
 
 // ============================================================================
-// LinkValidator Implementation
+// Internal Helpers (for legacy validation fallback)
 // ============================================================================
 
-AttachmentConfig* LinkValidator::FindAttachmentForPin(
-    PipelineNode* node,
-    ax::NodeEditor::PinId pinId,
-    NodeGraph& graph
-) {
+namespace {
+
+// Find attachment config by pin label
+AttachmentConfig* findAttachment(PipelineNode* node, const std::string& label) {
     if (!node)
         return nullptr;
 
-    // Check output pins
-    auto result = graph.findPin(pinId);
-    const Pin* pin = result.pin;
-    if (pin) {
-        return FindMatchingAttachment(node, pin->label);
-    }
+    auto& configs = node->shaderReflection.attachmentConfigs;
+    auto it = std::find_if(configs.begin(), configs.end(),
+        [&label](const AttachmentConfig& c) { return c.name == label; });
 
-    return nullptr;
+    return (it != configs.end()) ? &(*it) : nullptr;
 }
 
-FormatCompatibilityInfo LinkValidator::CanInputAcceptFormat(
-    PipelineNode* inputNode,
-    ax::NodeEditor::PinId inputPinId,
-    VkFormat outputFormat,
-    NodeGraph& graph
-) {
-    FormatCompatibilityInfo result;
-
-    if (!inputNode) {
-        result.reason = "Invalid input node";
-        return result;
-    }
-
-    auto pinLookup = graph.findPin(inputPinId);
-    const Pin* pin = pinLookup.pin;
-    if (!pin) {
-        result.reason = "Pin not found";
-        return result;
-    }
-
-    return CheckFormatCompatibility(pin, outputFormat);
-}
-
-const Pin* LinkValidator::FindPinInList(
-    const std::vector<Pin>& pins,
-    ax::NodeEditor::PinId pinId
-) {
-    for (const auto& pin : pins) {
-        if (pin.id == pinId) {
-            return &pin;
-        }
-    }
-    return nullptr;
-}
-
-ShaderTypes::AttachmentConfig* LinkValidator::FindMatchingAttachment(
-    PipelineNode* node,
-    const std::string& pinLabel
-) {
-    auto it = std::find_if(
-        node->shaderReflection.attachmentConfigs.begin(),
-        node->shaderReflection.attachmentConfigs.end(),
-        [&pinLabel](const ShaderTypes::AttachmentConfig& config) {
-            return config.name == pinLabel;
-        }
-    );
-
-    if (it != node->shaderReflection.attachmentConfigs.end()) {
-        return &(*it);
-    }
-
-    return nullptr;
-}
-
-FormatCompatibilityInfo LinkValidator::CheckFormatCompatibility(
-    const Pin* pin,
+// Check if output format is acceptable for an image input pin
+ValidationResult checkImageFormatCompatibility(
+    const Pin* inputPin,
     VkFormat outputFormat
 ) {
-    FormatCompatibilityInfo result;
-
-    switch (pin->type) {
-    case PinType::Image: {
-        std::vector<VkFormat> imageFormats =
-            AttachmentEditorUI::GetImageFormats();
-        for (const auto& format : imageFormats) {
-            if (format == outputFormat) {
-                result.compatible = true;
-                result.reason = "Exact image format match";
-                return result;
-            }
-        }
-        result.reason = "Mismatched image format for texture input";
-        break;
+    if (inputPin->type != PinType::Image) {
+        return ValidationResult::Ok();  // Not an image pin, skip format check
     }
-    case PinType::UniformBuffer:
-        result.compatible = true;
-        break;
-    default:
-        result.reason = "Matching is not defined for this pin type";
-        break;
+
+    // Check against allowed image formats (from validation_rules.cpp)
+    for (VkFormat allowed : GetAllowedImageFormats()) {
+        if (allowed == outputFormat) {
+            return ValidationResult::Ok();
+        }
+    }
+
+    return ValidationResult::Fail("Image format incompatible");
+}
+
+// Validate format compatibility between two pipeline nodes
+ValidationResult checkPipelineFormatCompatibility(
+    NodeGraph& graph,
+    const PinPair& pins
+) {
+    auto* outputNode = dynamic_cast<PipelineNode*>(pins.output.node);
+    auto* inputNode = dynamic_cast<PipelineNode*>(pins.input.node);
+
+    // Format check only applies between pipeline nodes
+    if (!outputNode || !inputNode) {
+        return ValidationResult::Ok();
+    }
+
+    // Only check format for image pins
+    if (pins.output.pin->type != PinType::Image) {
+        return ValidationResult::Ok();
+    }
+
+    // Find the output attachment to get its format
+    auto* attachment = findAttachment(outputNode, pins.output.pin->label);
+    if (!attachment) {
+        // No attachment config found - allow for backwards compatibility
+        return ValidationResult::Ok();
+    }
+
+    return checkImageFormatCompatibility(pins.input.pin, attachment->format);
+}
+
+}  // anonymous namespace
+
+// ============================================================================
+// PinPair Implementation
+// ============================================================================
+
+std::optional<PinPair> PinPair::create(
+    NodeGraph& graph,
+    ed::PinId a,
+    ed::PinId b
+) {
+    auto pinA = graph.findPin(a);
+    auto pinB = graph.findPin(b);
+
+    // Both pins must exist
+    if (!pinA.pin || !pinB.pin || !pinA.node || !pinB.node) {
+        return std::nullopt;
+    }
+
+    // Cannot link to same node
+    if (pinA.node->getId() == pinB.node->getId()) {
+        return std::nullopt;
+    }
+
+    // Must be output→input (different kinds)
+    if (pinA.kind == pinB.kind) {
+        return std::nullopt;
+    }
+
+    // Normalize to output→input
+    PinPair result;
+    if (pinA.kind == NodePinKind::Output) {
+        result.output = pinA;
+        result.input = pinB;
+    } else {
+        result.output = pinB;
+        result.input = pinA;
     }
 
     return result;
 }
 
-bool LinkValidator::CanCreateLink(
-    NodeGraph& graph,
-    ax::NodeEditor::PinId startId,
-    ax::NodeEditor::PinId endId,
-    bool logOnFailure
-) {
-    auto start = graph.findPin(startId);
-    auto end = graph.findPin(endId);
+// ============================================================================
+// LinkValidator Implementation
+// ============================================================================
 
-    // Basic validation
-    if (!ValidateBasicLinkRequirements(start, end)) {
-        return false;
-    }
+namespace LinkValidator {
 
-    // Determine output and input pins
-    PinLookupResult output, input;
-    DetermineOutputInput(start, end, output, input);
-
-    // Type compatibility check
-    if (!CheckTypeCompatibility(graph, output, input, logOnFailure)) {
-        return false;
-    }
-
-    // Input single-link constraint
-    if (LinkManager::isPinLinked(graph.pinToLinks, input.pin->id)) {
-        if (logOnFailure) {
-            Log::warning(
-                "Node Editor",
-                "Cannot connect: input pin '{}' is already linked",
-                input.pin->label
-            );
-        }
-        return false;
-    }
-
-    return true;
-}
-
-bool LinkValidator::IsLinkValid(
-    NodeGraph& graph,
-    ax::NodeEditor::PinId startId,
-    ax::NodeEditor::PinId endId
-) {
-    auto start = graph.findPin(startId);
-    auto end = graph.findPin(endId);
-
-    // Basic validation (pins exist, not self-loop, output→input direction)
-    if (!ValidateBasicLinkRequirements(start, end)) {
-        return false;
-    }
-
-    // Determine output and input pins
-    PinLookupResult output, input;
-    DetermineOutputInput(start, end, output, input);
-
-    // Type compatibility check (no logging, no single-link constraint)
-    return CheckTypeCompatibility(graph, output, input, false);
-}
-
-const char* LinkValidator::GetPinTypeName(PinType type) {
+const char* pinTypeName(PinType type) {
     switch (type) {
     case PinType::UniformBuffer:
         return "Uniform Buffer";
     case PinType::Image:
         return "Image";
     case PinType::VertexData:
-        return "Vertex data";
+        return "Vertex Data";
     case PinType::Camera:
         return "Camera";
     case PinType::Light:
@@ -192,134 +144,61 @@ const char* LinkValidator::GetPinTypeName(PinType type) {
     }
 }
 
-bool LinkValidator::ArePinTypesCompatible(
-    PinType outputType,
-    PinType inputType
-) {
-    // Pin types must match exactly
-    if (outputType == inputType) {
-        return true;
-    }
-
-    // No cross-type connections allowed
-    return false;
+bool arePinTypesCompatible(PinType outputType, PinType inputType) {
+    // Currently: types must match exactly
+    return outputType == inputType;
 }
 
-bool LinkValidator::ValidateBasicLinkRequirements(
-    const PinLookupResult& start,
-    const PinLookupResult& end
-) {
-    // Check if both pins exist
-    if (!start.pin || !end.pin || !start.node || !end.node) {
-        return false;
+ValidationResult validate(NodeGraph& graph, ed::PinId startId, ed::PinId endId) {
+    // Legacy validation path - used as fallback when pins aren't in registry
+    // Do NOT delegate to graph.validateLink() here - that would cause infinite recursion
+
+    // Create normalized pin pair
+    auto pins = PinPair::create(graph, startId, endId);
+    if (!pins) {
+        return ValidationResult::Fail("Invalid pins or same node");
     }
 
-    // Cannot link to self
-    if (start.node->getId() == end.node->getId()) {
-        return false;
-    }
-
-    // Must link Output to Input (different kinds)
-    if (start.kind == end.kind) {
-        return false;
-    }
-
-    return true;
-}
-
-void LinkValidator::DetermineOutputInput(
-    const PinLookupResult& start,
-    const PinLookupResult& end,
-    PinLookupResult& output,
-    PinLookupResult& input
-) {
-    if (start.kind == NodePinKind::Output) {
-        output = start;
-        input = end;
-    } else {
-        output = end;
-        input = start;
-    }
-}
-
-bool LinkValidator::CheckTypeCompatibility(
-    NodeGraph& graph,
-    const PinLookupResult& output,
-    const PinLookupResult& input,
-    bool logOnFailure
-) {
-    // First, check if pin types are compatible at a basic level
-    if (!ArePinTypesCompatible(output.pin->type, input.pin->type)) {
-        if (logOnFailure) {
-            Log::error(
-                "Node Editor",
-                "Pin types incompatible: {} cannot connect to {}",
-                GetPinTypeName(output.pin->type),
-                GetPinTypeName(input.pin->type)
-            );
-        }
-        return false;
-    }
-
-    PipelineNode* outputPipeline =
-        dynamic_cast<PipelineNode*>(output.node);
-    PipelineNode* inputPipeline =
-        dynamic_cast<PipelineNode*>(input.node);
-
-    if (!outputPipeline || !inputPipeline) {
-        return true; // Allow if not pipeline nodes
-    }
-
-    // Check attachment format compatibility for image pins
-    if (output.pin->type == PinType::Image) {
-        return CheckAttachmentFormatCompatibility(
-            graph, outputPipeline, inputPipeline, output, input, logOnFailure
+    // Check type compatibility
+    if (!arePinTypesCompatible(pins->output.pin->type, pins->input.pin->type)) {
+        return ValidationResult::Fail(
+            std::string(pinTypeName(pins->output.pin->type)) +
+            " cannot connect to " +
+            pinTypeName(pins->input.pin->type)
         );
     }
 
-    return true;
+    // Check format compatibility (for pipeline image pins)
+    auto formatResult = checkPipelineFormatCompatibility(graph, *pins);
+    if (!formatResult) {
+        return formatResult;
+    }
+
+    return ValidationResult::Ok();
 }
 
-bool LinkValidator::CheckAttachmentFormatCompatibility(
-    NodeGraph& graph,
-    PipelineNode* outputPipeline,
-    PipelineNode* inputPipeline,
-    const PinLookupResult& output,
-    const PinLookupResult& input,
-    bool logOnFailure
-) {
-    AttachmentConfig* outputAttachment =
-        FindAttachmentForPin(outputPipeline, output.pin->id, graph);
+ValidationResult canCreate(NodeGraph& graph, ed::PinId startId, ed::PinId endId) {
+    // Legacy validation path - used as fallback when pins aren't in registry
+    // Do NOT delegate to graph.canCreateLink() here - that would cause infinite recursion
 
-    if (!outputAttachment) {
-        Log::debug(
-            "Node Editor",
-            "Could not find attachment config for output pin"
+    // First, check if the link would be valid
+    auto result = validate(graph, startId, endId);
+    if (!result) {
+        return result;
+    }
+
+    // Additional constraint: input pins can only have one link
+    auto pins = PinPair::create(graph, startId, endId);
+    if (pins && LinkManager::isPinLinked(graph.pinToLinks, pins->input.pin->id)) {
+        return ValidationResult::Fail(
+            "Input pin '" + pins->input.pin->label + "' is already linked"
         );
-        return true; // Allow for backwards compatibility
     }
 
-    auto compatibility = CanInputAcceptFormat(
-        inputPipeline, input.pin->id, outputAttachment->format, graph
-    );
-
-    if (!compatibility.compatible) {
-        if (logOnFailure) {
-            Log::error(
-                "Node Editor",
-                "Format incompatibility: {} (Output format: {})",
-                compatibility.reason, outputAttachment->name
-            );
-        }
-        return false;
-    }
-
-    Log::debug(
-        "Node Editor", "Format compatibility OK: {}",
-        compatibility.reason
-    );
-    return true;
+    return ValidationResult::Ok();
 }
+
+}  // namespace LinkValidator
 
 // ============================================================================
 // LinkManager Implementation
@@ -340,12 +219,10 @@ void addLink(
 void removeLink(
     std::vector<Link>& links,
     PinToLinksIndex& pinToLinks,
-    ax::NodeEditor::LinkId id
+    ed::LinkId id
 ) {
-    auto it = std::find_if(
-        links.begin(), links.end(),
-        [&](const Link& l) { return l.id == id; }
-    );
+    auto it = std::find_if(links.begin(), links.end(),
+        [&](const Link& l) { return l.id == id; });
 
     if (it != links.end()) {
         // Remove from index
@@ -366,23 +243,20 @@ void removeLink(
 void removeLinksForPin(
     std::vector<Link>& links,
     PinToLinksIndex& pinToLinks,
-    ax::NodeEditor::PinId pinId
+    ed::PinId pinId
 ) {
     auto it = pinToLinks.find(pinId);
     if (it == pinToLinks.end())
         return;
 
-    // Copy the set since we'll modify it during iteration
+    // Copy IDs since we'll modify during iteration
     auto linkIds = it->second;
     for (const auto& linkId : linkIds) {
         removeLink(links, pinToLinks, linkId);
     }
 }
 
-bool isPinLinked(
-    const PinToLinksIndex& pinToLinks,
-    ax::NodeEditor::PinId id
-) {
+bool isPinLinked(const PinToLinksIndex& pinToLinks, ed::PinId id) {
     auto it = pinToLinks.find(id);
     return it != pinToLinks.end() && !it->second.empty();
 }
@@ -392,28 +266,22 @@ void removeInvalidLinks(
     std::vector<Link>& links,
     PinToLinksIndex& pinToLinks
 ) {
-    // Collect links to remove (where pins don't exist or are no longer compatible)
-    std::vector<ax::NodeEditor::LinkId> toRemove;
+    std::vector<ed::LinkId> toRemove;
 
     for (const auto& link : links) {
-        // Full validation: checks existence, type compatibility, format compatibility
-        if (!LinkValidator::IsLinkValid(graph, link.startPin, link.endPin)) {
+        if (!LinkValidator::validate(graph, link.startPin, link.endPin)) {
             toRemove.push_back(link.id);
         }
     }
 
-    // Remove collected links
     for (const auto& linkId : toRemove) {
         removeLink(links, pinToLinks, linkId);
     }
 }
 
-void clearLinks(
-    std::vector<Link>& links,
-    PinToLinksIndex& pinToLinks
-) {
+void clearLinks(std::vector<Link>& links, PinToLinksIndex& pinToLinks) {
     links.clear();
     pinToLinks.clear();
 }
 
-} // namespace LinkManager
+}  // namespace LinkManager

@@ -201,6 +201,43 @@ void ModelNode::createDefaultPins() {
     cameraPin.label = "Camera";
 }
 
+void ModelNode::registerPins(PinRegistry& registry) {
+    // Register all output pins
+    modelMatrixPinHandle = registry.registerPinWithId(
+        id,
+        modelMatrixPin.id,
+        modelMatrixPin.type,
+        PinKind::Output,
+        modelMatrixPin.label
+    );
+
+    texturePinHandle = registry.registerPinWithId(
+        id,
+        texturePin.id,
+        texturePin.type,
+        PinKind::Output,
+        texturePin.label
+    );
+
+    vertexDataPinHandle = registry.registerPinWithId(
+        id,
+        vertexDataPin.id,
+        vertexDataPin.type,
+        PinKind::Output,
+        vertexDataPin.label
+    );
+
+    cameraPinHandle = registry.registerPinWithId(
+        id,
+        cameraPin.id,
+        cameraPin.type,
+        PinKind::Output,
+        cameraPin.label
+    );
+
+    usesRegistry = true;
+}
+
 void ModelNode::render(
     ax::NodeEditor::Utilities::BlueprintNodeBuilder& builder,
     const NodeGraph& graph

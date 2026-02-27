@@ -3,6 +3,7 @@
 #include "camera_node.h"
 #include "light_node.h"
 #include "node.h"
+#include "pin_registry.h"
 #include "slang.h"
 #include "vulkan/vulkan_core.h"
 #include "vulkan_editor/io/serialization.h"
@@ -48,6 +49,7 @@ public:
     PipelineSettings settings;
     ShaderParsedResult shaderReflection;
     Pin vertexDataPin;
+    PinHandle vertexDataPinHandle = INVALID_PIN_HANDLE;
 
     PipelineNode();
     PipelineNode(int id);
@@ -55,6 +57,14 @@ public:
 
     nlohmann::json toJson() const override;
     void fromJson(const nlohmann::json& j) override;
+
+    // Pin registration (new system)
+    void registerPins(PinRegistry& registry) override;
+    bool usesPinRegistry() const override { return usesRegistry; }
+
+    // Re-register pins after shader reflection updates
+    void reregisterPins(PinRegistry& registry);
+
     void restorePinIds(
         const std::unordered_map<
             std::string,
@@ -122,6 +132,7 @@ public:
         std::vector<std::string> expectedMembers;
         bool useGlobal{false};
         Pin pin;
+        PinHandle pinHandle = INVALID_PIN_HANDLE;
     };
 
     struct DetectedLight {
@@ -130,6 +141,7 @@ public:
         int arraySize{0};
         bool useGlobal{false};
         Pin pin;
+        PinHandle pinHandle = INVALID_PIN_HANDLE;
     };
 
     bool hasCameraInput{false};
@@ -166,4 +178,7 @@ public:
     bool isMainPipeline = false;
     mutable bool isShadowMap = false;
     mutable bool deferred = false;
+
+private:
+    bool usesRegistry = false;
 };
