@@ -32,6 +32,7 @@
 class Editor {
 public:
     Editor(
+        VkPhysicalDevice physicalDevice,
         VkDevice device,
         VmaAllocator vma,
         uint32_t queueFamilyIndex,

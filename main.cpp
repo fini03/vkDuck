@@ -613,7 +613,7 @@ int main() {
     }
 
     Editor* editor = new Editor{
-        context->device, vma,
+        context->physicalDevice, context->device, vma,
         context->graphicsQueue.familyIndex, context->graphicsQueue.queue
     };
 

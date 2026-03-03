@@ -1255,6 +1255,21 @@ void PipelineNode::createPrimitives(primitives::Store& store) {
         return;
     }
 
+    // Get effective sample count (clamped to device limits)
+    VkSampleCountFlagBits sampleCount =
+        sampleCountOptionsEnum[settings.rasterizationSamples];
+    VkSampleCountFlagBits maxSupported = store.getMaxSampleCount();
+    if (sampleCount > maxSupported) {
+        Log::warning(
+            "Pipeline",
+            "Requested {}x MSAA not supported, using {}x",
+            static_cast<int>(sampleCount),
+            static_cast<int>(maxSupported)
+        );
+        sampleCount = maxSupported;
+    }
+    bool useMSAA = (sampleCount > VK_SAMPLE_COUNT_1_BIT);
+
     // Generate all attachments based on shader outputs
     for (auto& config : shaderReflection.attachmentConfigs) {
         // Skip if handle is already valid (e.g., from a previous failed
@@ -1280,11 +1295,13 @@ void PipelineNode::createPrimitives(primitives::Store& store) {
         image.imageInfo.extent.height = settings.extentConfig.height;
         image.imageInfo.extent.depth = 1;
         image.extentType = settings.extentConfig.type;
+        image.imageInfo.samples = sampleCount;  // Set sample count
 
         primitives::StoreHandle hAttachment = store.newAttachment();
         primitives::Attachment& attachment =
             store.attachments[hAttachment.handle];
         attachment.image = hImage;
+        attachment.desc.samples = sampleCount;  // Match sample count
         attachment.colorBlending = config.colorBlending;
         attachment.clearValue = config.clearValue;
 
@@ -1298,6 +1315,28 @@ void PipelineNode::createPrimitives(primitives::Store& store) {
                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
             image.viewInfo.subresourceRange.aspectMask =
                 VK_IMAGE_ASPECT_COLOR_BIT;
+
+            // Create single-sample resolve image for multisampled color attachments
+            if (useMSAA) {
+                primitives::StoreHandle hResolveImage = store.newImage();
+                primitives::Image& resolveImage = store.images[hResolveImage.handle];
+
+                resolveImage.imageInfo.format = config.format;
+                resolveImage.imageInfo.extent = image.imageInfo.extent;
+                resolveImage.extentType = settings.extentConfig.type;
+                resolveImage.imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+                resolveImage.imageInfo.usage =
+                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                    VK_IMAGE_USAGE_SAMPLED_BIT;
+                resolveImage.viewInfo.subresourceRange.aspectMask =
+                    VK_IMAGE_ASPECT_COLOR_BIT;
+
+                attachment.resolveImage = hResolveImage;
+
+                // Replace array with resolve image as output (MSAA image is internal)
+                // Other nodes should sample from the resolved single-sample image
+                store.arrays[hImageArray.handle].handles = {hResolveImage.handle};
+            }
         }
 
         config.handle = hImageArray;
@@ -1327,6 +1366,7 @@ void PipelineNode::createPrimitives(primitives::Store& store) {
         image.imageInfo.extent.height = settings.extentConfig.height;
         image.imageInfo.extent.depth = 1;
         image.extentType = settings.extentConfig.type;
+        image.imageInfo.samples = sampleCount;  // Match pipeline sample count
         image.imageInfo.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
         image.viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 
@@ -1334,6 +1374,7 @@ void PipelineNode::createPrimitives(primitives::Store& store) {
         primitives::Attachment& attachment =
             store.attachments[hAttachment.handle];
         attachment.image = hImage;
+        attachment.desc.samples = sampleCount;  // Match pipeline sample count
         attachment.clearValue.depthStencil.depth = settings.depthClearValue;
         attachment.clearValue.depthStencil.stencil = settings.stencilClearValue;
 

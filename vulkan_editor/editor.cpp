@@ -21,12 +21,14 @@
 #include <imgui_impl_vulkan.h>
 
 Editor::Editor(
+    VkPhysicalDevice physicalDevice,
     VkDevice device,
     VmaAllocator vma,
     uint32_t queueFamilyIndex,
     VkQueue queue
 )
     : liveView{
+          physicalDevice,
           device,
           vma,
           queueFamilyIndex,

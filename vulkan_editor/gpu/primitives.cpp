@@ -1551,14 +1551,17 @@ bool RenderPass::create(
     uint32_t minWidth = UINT32_MAX;
 
     std::vector<VkAttachmentDescription> attachmentDescs{};
-    attachmentDescs.reserve(attachments.size());
+    attachmentDescs.reserve(attachments.size() * 2);  // Reserve for potential resolve attachments
     std::vector<VkImageView> attachmentViews{};
-    attachmentViews.reserve(attachments.size());
+    attachmentViews.reserve(attachments.size() * 2);
     std::vector<VkAttachmentReference> colorRefs{};
     colorRefs.reserve(attachments.size());
+    std::vector<VkAttachmentReference> resolveRefs{};  // MSAA resolve attachments
+    resolveRefs.reserve(attachments.size());
     std::vector<VkAttachmentReference> depthRefs{};
     depthRefs.reserve(1);
-    clearValues.reserve(attachments.size());
+    clearValues.reserve(attachments.size() * 2);
+    bool hasResolveAttachments = false;
 
     uint32_t attachmentIndex = 0;
     for (StoreHandle hAttachment : attachments) {
@@ -1583,6 +1586,7 @@ bool RenderPass::create(
 
         VkAttachmentDescription& desc = attachmentDescs.back();
         desc.format = backingImage.imageInfo.format;
+        desc.samples = backingImage.imageInfo.samples;  // Use image's sample count
         desc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
         VkImageUsageFlags imUsage = backingImage.imageInfo.usage;
@@ -1594,6 +1598,41 @@ bool RenderPass::create(
                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
             );
             desc.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+            // Handle MSAA resolve attachment
+            if (attachment.resolveImage.isValid()) {
+                hasResolveAttachments = true;
+                const Image& resolveImg = store.images[attachment.resolveImage.handle];
+
+                // Add resolve attachment description
+                VkAttachmentDescription resolveDesc{};
+                resolveDesc.format = resolveImg.imageInfo.format;
+                resolveDesc.samples = VK_SAMPLE_COUNT_1_BIT;
+                resolveDesc.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                resolveDesc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                resolveDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                resolveDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                resolveDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                resolveDesc.finalLayout = isSampled
+                    ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                    : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+                uint32_t resolveIndex = static_cast<uint32_t>(attachmentDescs.size());
+                attachmentDescs.push_back(resolveDesc);
+                attachmentViews.push_back(resolveImg.view);
+                clearValues.push_back({});  // Resolve doesn't need clear
+
+                resolveRefs.emplace_back(
+                    resolveIndex,
+                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                );
+            } else {
+                // No resolve - use VK_ATTACHMENT_UNUSED
+                resolveRefs.emplace_back(
+                    VK_ATTACHMENT_UNUSED,
+                    VK_IMAGE_LAYOUT_UNDEFINED
+                );
+            }
         } else if (imUsage &
                    VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
             depthInput |= isSampled;
@@ -1615,8 +1654,9 @@ bool RenderPass::create(
 
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = colorRefs.size();
+    subpass.colorAttachmentCount = static_cast<uint32_t>(colorRefs.size());
     subpass.pColorAttachments = colorRefs.data();
+    subpass.pResolveAttachments = hasResolveAttachments ? resolveRefs.data() : nullptr;
     if (depthRefs.size() > 0)
         subpass.pDepthStencilAttachment = depthRefs.data();
 

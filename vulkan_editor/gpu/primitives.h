@@ -330,6 +330,13 @@ public:
     // we have to for the sake of simplicity.
     StoreHandle image{};
 
+    // MSAA: Single-sample resolve target for multisampled attachments
+    StoreHandle resolveImage{};
+
+    bool isMultisampled() const {
+        return desc.samples > VK_SAMPLE_COUNT_1_BIT;
+    }
+
     void generateCreate(const Store& store, std::ostream& out) const override;
 };
 
@@ -680,6 +687,25 @@ struct Store {
     std::array<Attachment, 100> attachments;
     std::array<Image, 1000> images;
     std::array<Present, 1> presents;
+
+    // Physical device reference for querying MSAA limits
+    VkPhysicalDevice physicalDevice{VK_NULL_HANDLE};
+
+    /// Get maximum sample count supported by device for both color and depth
+    VkSampleCountFlagBits getMaxSampleCount() const {
+        if (physicalDevice == VK_NULL_HANDLE) return VK_SAMPLE_COUNT_1_BIT;
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(physicalDevice, &props);
+        VkSampleCountFlags counts = props.limits.framebufferColorSampleCounts &
+                                    props.limits.framebufferDepthSampleCounts;
+        if (counts & VK_SAMPLE_COUNT_64_BIT) return VK_SAMPLE_COUNT_64_BIT;
+        if (counts & VK_SAMPLE_COUNT_32_BIT) return VK_SAMPLE_COUNT_32_BIT;
+        if (counts & VK_SAMPLE_COUNT_16_BIT) return VK_SAMPLE_COUNT_16_BIT;
+        if (counts & VK_SAMPLE_COUNT_8_BIT)  return VK_SAMPLE_COUNT_8_BIT;
+        if (counts & VK_SAMPLE_COUNT_4_BIT)  return VK_SAMPLE_COUNT_4_BIT;
+        if (counts & VK_SAMPLE_COUNT_2_BIT)  return VK_SAMPLE_COUNT_2_BIT;
+        return VK_SAMPLE_COUNT_1_BIT;
+    }
 
     void reset();
     void destroy(VkDevice device, VmaAllocator allocator);

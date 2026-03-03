@@ -16,7 +16,7 @@
  */
 class LiveView {
 public:
-    LiveView(VkDevice device, VmaAllocator vma, uint32_t queueFamilyIndex, VkQueue queue);
+    LiveView(VkPhysicalDevice physicalDevice, VkDevice device, VmaAllocator vma, uint32_t queueFamilyIndex, VkQueue queue);
     ~LiveView();
 
     bool render(uint32_t width, uint32_t height);

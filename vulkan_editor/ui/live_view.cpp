@@ -8,6 +8,7 @@
 #include <vk_mem_alloc.h>
 
 LiveView::LiveView(
+    VkPhysicalDevice physicalDevice,
     VkDevice device,
     VmaAllocator vma,
     uint32_t queueFamilyIndex,
@@ -17,6 +18,8 @@ LiveView::LiveView(
     , vma{vma}
     , queueFamilyIndex{queueFamilyIndex}
     , queue{queue} {
+    // Set physical device on store for MSAA capability queries
+    store.physicalDevice = physicalDevice;
 
     VkCommandPoolCreateInfo poolInfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
