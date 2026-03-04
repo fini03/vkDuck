@@ -34,6 +34,12 @@ void ModelSettingsUI::Draw(ModelNode* modelNode, ShaderManager* shaderManager, N
             fs::path projectRoot = shaderManager->getProjectRoot();
             fs::path absolutePath = projectRoot / currentModelPath;
             modelNode->loadModel(absolutePath, projectRoot);
+
+            // If the new model has no cameras, remove any existing links to the camera pin
+            // This allows reconnecting when switching between models with/without cameras
+            if (modelNode->gltfCameras.empty() && graph) {
+                graph->removeLinksForPin(modelNode->cameraPin.id);
+            }
         }
 
         // Show current loading state
