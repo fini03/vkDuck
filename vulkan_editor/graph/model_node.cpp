@@ -510,7 +510,8 @@ void ModelNode::createPrimitives(primitives::Store& store) {
         storeImage.imageInfo.extent.width = defaultTexture.width;
         storeImage.imageInfo.extent.height = defaultTexture.height;
         storeImage.imageInfo.extent.depth = 1;
-        storeImage.imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        storeImage.imageInfo.usage =
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
         storeImage.viewInfo.subresourceRange.aspectMask =
             VK_IMAGE_ASPECT_COLOR_BIT;
         return texture;
@@ -528,6 +529,7 @@ void ModelNode::createPrimitives(primitives::Store& store) {
             if (!textureNotFound.isValid())
                 textureNotFound = createNewDefaultTexture();
             image.image = textureNotFound;
+            //continue;
         }
 
         image.image = store.newImage();
@@ -539,7 +541,8 @@ void ModelNode::createPrimitives(primitives::Store& store) {
         storeImage.imageInfo.extent.width = image.width;
         storeImage.imageInfo.extent.height = image.height;
         storeImage.imageInfo.extent.depth = 1;
-        storeImage.imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        storeImage.imageInfo.usage =
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
         storeImage.viewInfo.subresourceRange.aspectMask =
             VK_IMAGE_ASPECT_COLOR_BIT;
         // Store original image path for code generation (wuffs loading)

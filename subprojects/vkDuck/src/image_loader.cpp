@@ -18,6 +18,7 @@
 #define WUFFS_CONFIG__MODULE__DEFLATE
 #define WUFFS_CONFIG__MODULE__ZLIB
 #define WUFFS_CONFIG__MODULE__PNG
+#define WUFFS_CONFIG__MODULE__JPEG
 #include "wuffs-v0.4.c"
 
 namespace fs = std::filesystem;
