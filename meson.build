@@ -78,8 +78,13 @@ editor_files = files(
   'vulkan_editor/io/directory_watcher.cpp',
   'vulkan_editor/io/model_watcher.cpp',
 
-  # GPU resources and memory
-  'vulkan_editor/gpu/primitives.cpp',
+  # GPU resources and memory (split primitives)
+  'vulkan_editor/gpu/primitives/vertex_data.cpp',
+  'vulkan_editor/gpu/primitives/uniform_buffer.cpp',
+  'vulkan_editor/gpu/primitives/images.cpp',
+  'vulkan_editor/gpu/primitives/pipeline.cpp',
+  'vulkan_editor/gpu/primitives/descriptors.cpp',
+  'vulkan_editor/gpu/primitives/store.cpp',
   'vulkan_editor/gpu/batched_stager.cpp',
   'vulkan_editor/gpu/staging_buffer_pool.cpp',
 
