@@ -42,12 +42,13 @@ nlohmann::json LightNode::toJson() const {
 
     // Serialize light data array
     nlohmann::json lightsJson = nlohmann::json::array();
-    for (const auto& light : lights) {
+    for (const auto& light : lightsBuffer.lights) {
         lightsJson.push_back(
             {{"position",
               {light.position.x, light.position.y, light.position.z}},
              {"color", {light.color.x, light.color.y, light.color.z}},
-             {"radius", light.radius}}
+             {"radius", light.radius},
+             {"intensity", light.intensity}}
         );
     }
     j["lights"] = lightsJson;
@@ -77,10 +78,16 @@ void LightNode::fromJson(const nlohmann::json& j) {
     shaderControlledCount = j.value("shaderControlledCount", false);
 
     // Restore lights array
+    lightsBuffer.lights.clear();
     if (j.contains("lights") && j["lights"].is_array()) {
-        lights.clear();
-        for (const auto& jLight : j["lights"]) {
-            LightData light;
+        const auto& lightsArr = j["lights"];
+        numLights = static_cast<int>(lightsArr.size());
+        lightsBuffer.lights.resize(numLights);
+
+        for (int i = 0; i < numLights; ++i) {
+            const auto& jLight = lightsArr[i];
+            auto& light = lightsBuffer.lights[i];
+
             if (jLight.contains("position") &&
                 jLight["position"].is_array()) {
                 light.position = glm::vec3(
@@ -98,8 +105,9 @@ void LightNode::fromJson(const nlohmann::json& j) {
                 );
             }
             light.radius = jLight.value("radius", 1.0f);
-            lights.push_back(light);
+            light.intensity = jLight.value("intensity", 1.0f);
         }
+        lightsBuffer.updateGpuBuffer();
     } else {
         ensureLightCount();
     }
@@ -134,20 +142,29 @@ void LightNode::registerPins(PinRegistry& registry) {
 }
 
 void LightNode::ensureLightCount() {
-    if (lights.size() != static_cast<size_t>(numLights)) {
-        lights.resize(numLights);
+    // Ensure at least 1 light
+    if (numLights < 1) numLights = 1;
 
-        // Position lights in a circle by default
-        for (int i = 0; i < numLights; ++i) {
+    // Resize if needed
+    if (static_cast<int>(lightsBuffer.lights.size()) != numLights) {
+        int oldSize = static_cast<int>(lightsBuffer.lights.size());
+        lightsBuffer.lights.resize(numLights);
+
+        // Initialize new lights in a circle
+        for (int i = oldSize; i < numLights; ++i) {
             float angle = (float)i / (float)numLights * 2.0f * std::numbers::pi_v<float>;
             float radius = 5.0f;
 
-            lights[i].position = glm::vec3(
+            lightsBuffer.lights[i].position = glm::vec3(
                 cos(angle) * radius, 2.0f, sin(angle) * radius
             );
-            lights[i].color = glm::vec3(1.0f, 1.0f, 1.0f);
-            lights[i].radius = 5.0f;
+            lightsBuffer.lights[i].color = glm::vec3(1.0f, 1.0f, 1.0f);
+            lightsBuffer.lights[i].radius = 5.0f;
+            lightsBuffer.lights[i].intensity = 1.0f;
         }
+
+        // Update GPU buffer
+        lightsBuffer.updateGpuBuffer();
     }
 }
 
@@ -223,22 +240,22 @@ void LightNode::clearPrimitives() {
 void LightNode::createPrimitives(primitives::Store& store) {
     ensureLightCount();
 
-    // Create single UniformBuffer primitive containing all lights
+    // Ensure GPU buffer is up to date
+    lightsBuffer.updateGpuBuffer();
+
+    // Create single UniformBuffer primitive containing lights
     primitives::StoreHandle hUbo = store.newUniformBuffer();
     lightUbo = &store.uniformBuffers[hUbo.handle];
 
     // Mark this UBO as containing light data
     lightUbo->dataType = primitives::UniformDataType::Light;
 
-    // Point to our persistent light array
-    lightUbo->data = std::span<uint8_t>(
-        reinterpret_cast<uint8_t*>(lights.data()),
-        sizeof(LightData) * lights.size()
-    );
+    // Point to our dynamic lights buffer (header + array)
+    lightUbo->data = lightsBuffer.getSpan();
 
     Log::debug(
         "LightNode", "Holding {} lights in UBO of size {} bytes",
-        lights.size(),
+        lightsBuffer.header.numLights,
         lightUbo->data.size()
     );
 
@@ -250,11 +267,11 @@ void LightNode::createPrimitives(primitives::Store& store) {
     lightPrimitive->numLights = numLights;
 
     // Copy light data for code generation
-    lightPrimitive->lights.resize(lights.size());
-    for (size_t i = 0; i < lights.size(); ++i) {
-        lightPrimitive->lights[i].position = lights[i].position;
-        lightPrimitive->lights[i].color = lights[i].color;
-        lightPrimitive->lights[i].radius = lights[i].radius;
+    lightPrimitive->lights.resize(numLights);
+    for (int i = 0; i < numLights; ++i) {
+        lightPrimitive->lights[i].position = lightsBuffer.lights[i].position;
+        lightPrimitive->lights[i].color = lightsBuffer.lights[i].color;
+        lightPrimitive->lights[i].radius = lightsBuffer.lights[i].radius;
     }
 
     // Create array with single UBO
@@ -265,7 +282,7 @@ void LightNode::createPrimitives(primitives::Store& store) {
 
     Log::debug(
         "LightNode", "Created light array UBO and Light primitive with {} lights",
-        lights.size()
+        lightsBuffer.header.numLights
     );
 }
 

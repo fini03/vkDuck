@@ -86,6 +86,9 @@ struct ModelCameraData {
     alignas(16) glm::mat4 proj{1.0f};
 };
 
+// Use primitives::LightData directly for shader compatibility
+using LightData = primitives::LightData;
+
 // GLTFCamera is now provided by vkDuck/model_loader.h
 
 struct ModelSettings : public ISerializable {
@@ -173,12 +176,14 @@ public:
     Pin texturePin;
     Pin vertexDataPin;
     Pin cameraPin;
+    Pin lightPin;
 
     // New registry handles
     PinHandle modelMatrixPinHandle = INVALID_PIN_HANDLE;
     PinHandle texturePinHandle = INVALID_PIN_HANDLE;
     PinHandle vertexDataPinHandle = INVALID_PIN_HANDLE;
     PinHandle cameraPinHandle = INVALID_PIN_HANDLE;
+    PinHandle lightPinHandle = INVALID_PIN_HANDLE;
 
     std::vector<EditorMaterial> materials;
     std::vector<EditorImage> images;
@@ -190,6 +195,12 @@ public:
     float aspectRatio{16.0f / 9.0f};
 
     void updateCameraFromSelection();
+
+    std::vector<GLTFLight> gltfLights;
+    int selectedLightIndex{-1};  // For UI display purposes
+    primitives::LightsBuffer lightsBuffer;  // All lights for shader (dynamic size)
+
+    void updateLightsFromGLTF();
 
     void setFileWatchingEnabled(bool enabled);
     bool isFileWatchingEnabled() const;
@@ -223,6 +234,8 @@ private:
     primitives::StoreHandle cameraUboArray{};
     primitives::UniformBuffer* cameraUbo{nullptr};
     primitives::CameraType cameraType{primitives::CameraType::Fixed};
+    primitives::StoreHandle lightUboArray{};
+    primitives::UniformBuffer* lightUbo{nullptr};
 
     std::vector<ModelMatrices> modelMatricesData;
 

@@ -402,6 +402,42 @@ void processCameraNode(
     }
 }
 
+// Process light node transforms (KHR_lights_punctual)
+void processLightNode(
+    tinygltf::Model& model,
+    int nodeIndex,
+    const glm::mat4& parentTransform,
+    std::vector<GLTFLight>& lights
+) {
+    if (nodeIndex < 0 || static_cast<size_t>(nodeIndex) >= model.nodes.size())
+        return;
+
+    const tinygltf::Node& node = model.nodes[nodeIndex];
+    glm::mat4 localTransform = getNodeTransform(node);
+    glm::mat4 worldTransform = parentTransform * localTransform;
+
+    // Check if this node has a light (via KHR_lights_punctual extension)
+    if (node.extensions.count("KHR_lights_punctual")) {
+        const auto& ext = node.extensions.at("KHR_lights_punctual");
+        if (ext.Has("light")) {
+            int lightIndex = ext.Get("light").GetNumberAsInt();
+            if (lightIndex >= 0 && static_cast<size_t>(lightIndex) < lights.size()) {
+                GLTFLight& light = lights[lightIndex];
+                light.transform = worldTransform;
+                // Extract position from transform matrix
+                light.position = glm::vec3(worldTransform[3]);
+                // Extract direction (lights point down -Z in local space)
+                light.direction = -glm::normalize(glm::vec3(worldTransform[2]));
+            }
+        }
+    }
+
+    // Process children
+    for (int child : node.children) {
+        processLightNode(model, child, worldTransform, lights);
+    }
+}
+
 } // anonymous namespace
 // }}}
 
@@ -475,6 +511,78 @@ ModelData loadModel(const std::string& path, const std::string& projectRoot) {
     // Find camera transforms from scene nodes
     for (int sceneIndex : model.scenes[defaultScene].nodes) {
         processCameraNode(model, sceneIndex, glm::mat4(1.0f), result.cameras);
+    }
+    // }}}
+
+    // Extract lights from KHR_lights_punctual extension {{{
+    if (model.extensions.count("KHR_lights_punctual")) {
+        const auto& lightsExt = model.extensions.at("KHR_lights_punctual");
+        if (lightsExt.Has("lights") && lightsExt.Get("lights").IsArray()) {
+            const auto& lightsArray = lightsExt.Get("lights");
+            for (size_t i = 0; i < lightsArray.ArrayLen(); ++i) {
+                const auto& lightObj = lightsArray.Get(static_cast<int>(i));
+                GLTFLight light;
+
+                // Name
+                if (lightObj.Has("name")) {
+                    light.name = lightObj.Get("name").Get<std::string>();
+                } else {
+                    light.name = "Light " + std::to_string(i);
+                }
+
+                // Type
+                if (lightObj.Has("type")) {
+                    std::string typeStr = lightObj.Get("type").Get<std::string>();
+                    if (typeStr == "directional") {
+                        light.type = GLTFLightType::Directional;
+                    } else if (typeStr == "point") {
+                        light.type = GLTFLightType::Point;
+                    } else if (typeStr == "spot") {
+                        light.type = GLTFLightType::Spot;
+                    }
+                }
+
+                // Color (default white)
+                if (lightObj.Has("color") && lightObj.Get("color").IsArray()) {
+                    const auto& colorArr = lightObj.Get("color");
+                    if (colorArr.ArrayLen() >= 3) {
+                        light.color = glm::vec3(
+                            static_cast<float>(colorArr.Get(0).GetNumberAsDouble()),
+                            static_cast<float>(colorArr.Get(1).GetNumberAsDouble()),
+                            static_cast<float>(colorArr.Get(2).GetNumberAsDouble())
+                        );
+                    }
+                }
+
+                // Intensity (default 1.0)
+                if (lightObj.Has("intensity")) {
+                    light.intensity = static_cast<float>(lightObj.Get("intensity").GetNumberAsDouble());
+                }
+
+                // Range (point/spot only, 0 = infinite)
+                if (lightObj.Has("range")) {
+                    light.range = static_cast<float>(lightObj.Get("range").GetNumberAsDouble());
+                }
+
+                // Spot light cone angles
+                if (light.type == GLTFLightType::Spot && lightObj.Has("spot")) {
+                    const auto& spotObj = lightObj.Get("spot");
+                    if (spotObj.Has("innerConeAngle")) {
+                        light.innerConeAngle = static_cast<float>(spotObj.Get("innerConeAngle").GetNumberAsDouble());
+                    }
+                    if (spotObj.Has("outerConeAngle")) {
+                        light.outerConeAngle = static_cast<float>(spotObj.Get("outerConeAngle").GetNumberAsDouble());
+                    }
+                }
+
+                result.lights.push_back(light);
+            }
+        }
+    }
+
+    // Find light transforms from scene nodes
+    for (int sceneIndex : model.scenes[defaultScene].nodes) {
+        processLightNode(model, sceneIndex, glm::mat4(1.0f), result.lights);
     }
     // }}}
 
