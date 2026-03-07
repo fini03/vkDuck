@@ -17,121 +17,124 @@ void ModelSettingsUI::Draw(ModelNode* modelNode, ShaderManager* shaderManager, N
     ImGui::Text("Model Node Settings");
     ImGui::Separator();
 
-    // Model Path - use dropdown from models/ folder
-    ImGui::Text("Model:");
+    // Model info (read-only, selection happens in Asset Library tab)
+    const CachedModel* cached = modelNode->getCachedModel();
 
-    if (shaderManager) {
-        fs::path currentModelPath = modelNode->settings.modelPath;
+    if (modelNode->settings.modelPath[0] == '\0') {
+        ImGui::TextColored(
+            ImVec4(0.7f, 0.7f, 0.4f, 1.0f),
+            "No model assigned"
+        );
+        ImGui::TextWrapped(
+            "Use the Asset Library tab to load and assign a model to this node."
+        );
+    } else if (modelNode->hasModel() && cached) {
+        // Model is loaded - show info
+        ImGui::TextColored(
+            ImVec4(0.5f, 0.9f, 0.5f, 1.0f),
+            "Model: %s",
+            cached->displayName.c_str()
+        );
 
-        if (shaderManager->showModelPicker("##ModelPicker", currentModelPath)) {
-            // Model was selected from dropdown - store relative path
-            strncpy(
-                modelNode->settings.modelPath, currentModelPath.generic_string().c_str(),
-                sizeof(modelNode->settings.modelPath) - 1
+        ImGui::TextColored(
+            ImVec4(0.6f, 0.6f, 0.6f, 1.0f),
+            "Path: %s",
+            modelNode->settings.modelPath
+        );
+
+        // Model stats
+        ImGui::Spacing();
+        ImGui::Text(
+            "Vertices: %zu  |  Indices: %zu  |  Meshes: %zu",
+            cached->modelData.getTotalVertexCount(),
+            cached->modelData.getTotalIndexCount(),
+            cached->modelData.getGeometryCount()
+        );
+
+        if (!cached->cameras.empty() || !cached->lights.empty()) {
+            ImGui::Text(
+                "Cameras: %zu  |  Lights: %zu",
+                cached->cameras.size(),
+                cached->lights.size()
             );
-            modelNode->settings.modelPath[sizeof(modelNode->settings.modelPath) - 1] = '\0';
-
-            // Load the model using project root + relative path
-            fs::path projectRoot = shaderManager->getProjectRoot();
-            fs::path absolutePath = projectRoot / currentModelPath;
-            modelNode->loadModel(absolutePath, projectRoot);
-
-            // If the new model has no cameras, remove any existing links to the camera pin
-            // This allows reconnecting when switching between models with/without cameras
-            if (modelNode->gltfCameras.empty() && graph) {
-                graph->removeLinksForPin(modelNode->cameraPin.id);
-            }
-
-            // If the new model has no lights, remove any existing links to the light pin
-            if (modelNode->gltfLights.empty() && graph) {
-                graph->removeLinksForPin(modelNode->lightPin.id);
-            }
         }
 
-        // Show current loading state
-        if (modelNode->settings.modelPath[0] != '\0') {
-            auto loadingState = modelNode->getLoadingState();
-            if (loadingState == ModelFileWatcher::LoadingState::Loaded) {
-                ImGui::TextColored(
-                    ImVec4(0.6f, 0.8f, 0.6f, 1.0f),
-                    "Loaded: %s",
-                    modelNode->settings.modelPath
+        // Create Default Renderer button
+        if (graph && shaderManager) {
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.5f, 1.0f), "Quick Setup");
+            ImGui::TextWrapped("Create a basic Phong rendering setup for this model with camera, light, and output.");
+
+            if (ImGui::Button("Create Default Renderer", ImVec2(-1, 0))) {
+                fs::path projectRoot = shaderManager->getProjectRoot();
+                bool success = DefaultRendererSetup::createForModel(
+                    *graph, modelNode, *shaderManager, projectRoot
                 );
-            } else if (loadingState == ModelFileWatcher::LoadingState::Loading) {
-                ImGui::TextColored(
-                    ImVec4(0.8f, 0.8f, 0.4f, 1.0f),
-                    "Loading: %s",
-                    modelNode->settings.modelPath
-                );
-            } else if (loadingState == ModelFileWatcher::LoadingState::Error) {
-                ImGui::TextColored(
-                    ImVec4(0.8f, 0.4f, 0.4f, 1.0f),
-                    "Error loading: %s",
-                    modelNode->settings.modelPath
-                );
-            } else {
-                ImGui::TextColored(
-                    ImVec4(0.6f, 0.6f, 0.6f, 1.0f),
-                    "Path: %s (not loaded)",
-                    modelNode->settings.modelPath
-                );
+                if (success) {
+                    ImGui::OpenPopup("DefaultRendererCreated");
+                } else {
+                    ImGui::OpenPopup("DefaultRendererFailed");
+                }
             }
 
-            // Create Default Renderer button
-            if (graph) {
-                ImGui::Spacing();
-                ImGui::Separator();
-                ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.5f, 1.0f), "Quick Setup");
-                ImGui::TextWrapped("Create a basic Phong rendering setup for this model with camera, light, and output.");
-
-                if (ImGui::Button("Create Default Renderer", ImVec2(-1, 0))) {
-                    fs::path projectRoot = shaderManager->getProjectRoot();
-                    bool success = DefaultRendererSetup::createForModel(
-                        *graph, modelNode, *shaderManager, projectRoot
-                    );
-                    if (success) {
-                        ImGui::OpenPopup("DefaultRendererCreated");
-                    } else {
-                        ImGui::OpenPopup("DefaultRendererFailed");
-                    }
+            // Success popup
+            if (ImGui::BeginPopupModal("DefaultRendererCreated", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+                ImGui::Text("Default renderer created successfully!");
+                ImGui::TextWrapped("Camera, Light, Pipeline, and Present nodes have been added and connected.");
+                if (ImGui::Button("OK", ImVec2(120, 0))) {
+                    ImGui::CloseCurrentPopup();
                 }
+                ImGui::EndPopup();
+            }
 
-                // Success popup
-                if (ImGui::BeginPopupModal("DefaultRendererCreated", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-                    ImGui::Text("Default renderer created successfully!");
-                    ImGui::TextWrapped("Camera, Light, Pipeline, and Present nodes have been added and connected.");
-                    if (ImGui::Button("OK", ImVec2(120, 0))) {
-                        ImGui::CloseCurrentPopup();
-                    }
-                    ImGui::EndPopup();
+            // Failure popup
+            if (ImGui::BeginPopupModal("DefaultRendererFailed", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Failed to create default renderer.");
+                ImGui::TextWrapped("Check if default_phong shaders exist in project/shaders/");
+                if (ImGui::Button("OK", ImVec2(120, 0))) {
+                    ImGui::CloseCurrentPopup();
                 }
-
-                // Failure popup
-                if (ImGui::BeginPopupModal("DefaultRendererFailed", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-                    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Failed to create default renderer.");
-                    ImGui::TextWrapped("Check if default_phong shaders exist in project/shaders/");
-                    if (ImGui::Button("OK", ImVec2(120, 0))) {
-                        ImGui::CloseCurrentPopup();
-                    }
-                    ImGui::EndPopup();
-                }
+                ImGui::EndPopup();
             }
         }
     } else {
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "No project selected");
+        // Model path set but not loaded
+        ModelHandle handle = modelNode->getModelHandle();
+        ModelStatus status = g_modelManager ? g_modelManager->getStatus(handle) : ModelStatus::NotLoaded;
+
+        if (status == ModelStatus::Loading) {
+            ImGui::TextColored(
+                ImVec4(0.8f, 0.8f, 0.4f, 1.0f),
+                "Loading: %s",
+                modelNode->settings.modelPath
+            );
+        } else if (status == ModelStatus::Error) {
+            ImGui::TextColored(
+                ImVec4(0.9f, 0.4f, 0.4f, 1.0f),
+                "Error loading: %s",
+                modelNode->settings.modelPath
+            );
+        } else {
+            ImGui::TextColored(
+                ImVec4(0.6f, 0.6f, 0.6f, 1.0f),
+                "Path: %s (not loaded)",
+                modelNode->settings.modelPath
+            );
+        }
     }
 
     ImGui::Spacing();
 
     // GLTF Cameras dropdown (only show if model has cameras)
-    if (!modelNode->gltfCameras.empty()) {
+    if (cached && !cached->cameras.empty()) {
         ImGui::Separator();
         ImGui::Text("GLTF Cameras");
 
         // Build camera names for combo box
         std::vector<const char*> cameraNames;
         cameraNames.push_back("None (Default)");
-        for (const auto& cam : modelNode->gltfCameras) {
+        for (const auto& cam : cached->cameras) {
             cameraNames.push_back(cam.name.c_str());
         }
 
@@ -142,14 +145,13 @@ void ModelSettingsUI::Draw(ModelNode* modelNode, ShaderManager* shaderManager, N
                 static_cast<int>(cameraNames.size())
             )) {
             modelNode->selectedCameraIndex = comboIndex - 1;
-            // Update camera matrices when selection changes
             modelNode->updateCameraFromSelection();
         }
 
         // Show selected camera info
-        if (modelNode->selectedCameraIndex >= 0) {
-            const auto& cam =
-                modelNode->gltfCameras[modelNode->selectedCameraIndex];
+        if (modelNode->selectedCameraIndex >= 0 &&
+            modelNode->selectedCameraIndex < static_cast<int>(cached->cameras.size())) {
+            const auto& cam = cached->cameras[modelNode->selectedCameraIndex];
             ImGui::TextColored(
                 ImVec4(0.7f, 0.9f, 0.7f, 1.0f), "Camera: %s",
                 cam.name.c_str()
@@ -180,13 +182,13 @@ void ModelSettingsUI::Draw(ModelNode* modelNode, ShaderManager* shaderManager, N
     }
 
     // GLTF Lights info (only show if model has lights)
-    if (!modelNode->gltfLights.empty()) {
+    if (cached && !cached->lights.empty()) {
         ImGui::Separator();
-        ImGui::Text("GLTF Lights (%zu total)", modelNode->gltfLights.size());
+        ImGui::Text("GLTF Lights (%zu total)", cached->lights.size());
 
         // Build light names for combo box (for viewing details)
         std::vector<const char*> lightNames;
-        for (const auto& light : modelNode->gltfLights) {
+        for (const auto& light : cached->lights) {
             lightNames.push_back(light.name.c_str());
         }
 
@@ -201,9 +203,8 @@ void ModelSettingsUI::Draw(ModelNode* modelNode, ShaderManager* shaderManager, N
 
         // Show inspected light info
         if (modelNode->selectedLightIndex >= 0 &&
-            modelNode->selectedLightIndex < static_cast<int>(modelNode->gltfLights.size())) {
-            const auto& light =
-                modelNode->gltfLights[modelNode->selectedLightIndex];
+            modelNode->selectedLightIndex < static_cast<int>(cached->lights.size())) {
+            const auto& light = cached->lights[modelNode->selectedLightIndex];
             ImGui::TextColored(
                 ImVec4(0.9f, 0.9f, 0.7f, 1.0f), "Light: %s",
                 light.name.c_str()

@@ -1,4 +1,5 @@
 #include "default_renderer.h"
+#include "../asset/model_manager.h"
 #include "fixed_camera_node.h"
 #include "light_node.h"
 #include "model_node.h"
@@ -40,7 +41,8 @@ bool DefaultRendererSetup::createForModel(
     ImVec2 modelPos = modelNode->position;
 
     // Camera setup: use GLTF camera if available, otherwise create a fixed camera
-    bool useGLTFCamera = !modelNode->gltfCameras.empty();
+    const CachedModel* cached = modelNode->getCachedModel();
+    bool useGLTFCamera = cached && !cached->cameras.empty();
     FixedCameraNode* fixedCamPtr = nullptr;
     ax::NodeEditor::PinId cameraPinToConnect;
 
@@ -50,7 +52,7 @@ bool DefaultRendererSetup::createForModel(
         modelNode->updateCameraFromSelection();
         cameraPinToConnect = modelNode->cameraPin.id;
         Log::info("DefaultRenderer", "Using GLTF camera '{}' from model",
-                  modelNode->gltfCameras[0].name);
+                  cached->cameras[0].name);
     } else {
         // Create a Fixed Camera Node positioned to look at the model
         auto cameraNode = std::make_unique<FixedCameraNode>();

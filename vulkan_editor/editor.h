@@ -1,5 +1,6 @@
 #pragma once
 
+#include "asset/model_manager.h"
 #include "io/file_generator.h"
 #include "io/graph_serializer.h"
 #include "imgui.h"
@@ -9,6 +10,7 @@
 #include "graph/pipeline_node.h"
 #include "shader/shader_manager.h"
 #include "ui/live_view.h"
+#include "ui/pipeline_editor_ui.h"
 #include "ui/pipeline_settings_ui.h"
 #include <chrono>
 #include <memory>
@@ -61,11 +63,16 @@ private:
     bool pendingSavePositionSync = false;
     std::filesystem::path pendingSavePath;
 
+    // ModelManager must be declared first so it's destroyed last
+    // (members are destroyed in reverse declaration order)
+    ModelManager modelManager;
+
     std::unique_ptr<NodeGraph> graph;
     std::unique_ptr<FileGenerator> file_generator;
     std::unique_ptr<PipelineState> pipeline_state;
     std::unique_ptr<ShaderManager> shader_manager;
     std::unique_ptr<PipelineSettingsUI> pipeline_settings_ui;
+    std::unique_ptr<PipelineEditorUI> pipelineEditor;
     LiveView liveView;
 
     std::chrono::high_resolution_clock::time_point lastFrameTime{

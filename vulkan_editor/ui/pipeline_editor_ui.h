@@ -97,5 +97,10 @@ public:
     void SyncNodePositionsFromEditor();
     void ApplyNodePositionsToEditor();
 
+    /**
+     * @brief Get the currently selected model node (if any).
+     */
+    ModelNode* getSelectedModelNode() const { return selectedModel; }
+
     void* m_HeaderBackground = nullptr;
 };

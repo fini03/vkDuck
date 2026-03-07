@@ -5,6 +5,7 @@
 #include "light_editor_ui.h"
 #include "model_settings_ui.h"
 #include "pipeline_settings_ui.h"
+#include "vulkan_editor/asset/model_manager.h"
 #include "vulkan_editor/util/logger.h"
 #include "vulkan_editor/graph/camera_node.h"
 #include "vulkan_editor/graph/fixed_camera_node.h"
@@ -153,7 +154,8 @@ void PipelineEditorUI::DrawNodeSettings(ShaderManager* shaderManager) {
         ModelNode* modelWithCameras = nullptr;
         for (const auto& node : graph.nodes) {
             if (auto* model = dynamic_cast<ModelNode*>(node.get())) {
-                if (!model->gltfCameras.empty()) {
+                const CachedModel* cached = model->getCachedModel();
+                if (cached && !cached->cameras.empty()) {
                     modelWithCameras = model;
                     break;
                 }

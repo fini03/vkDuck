@@ -47,6 +47,9 @@ editor_files = files(
   # Main editor
   'vulkan_editor/editor.cpp',
 
+  # Asset management
+  'vulkan_editor/asset/model_manager.cpp',
+
   # Graph - node system
   'vulkan_editor/graph/node.cpp',
   'vulkan_editor/graph/node_graph.cpp',
@@ -84,6 +87,7 @@ editor_files = files(
   'vulkan_editor/util/logger.cpp',
 
   # UI
+  'vulkan_editor/asset/asset_library_ui.cpp',
   'vulkan_editor/ui/pipeline_editor_ui.cpp',
   'vulkan_editor/ui/pipeline_settings_ui.cpp',
   'vulkan_editor/ui/model_settings_ui.cpp',

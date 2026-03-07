@@ -1,4 +1,5 @@
 #include "camera_editor_ui.h"
+#include "vulkan_editor/asset/model_manager.h"
 #include "vulkan_editor/graph/camera_node.h"
 #include "vulkan_editor/graph/fixed_camera_node.h"
 #include "vulkan_editor/graph/fps_camera_node.h"
@@ -38,11 +39,12 @@ void CameraEditorUI::DrawOrbitalCamera(
     ModelNode* modelNode
 ) {
     // GLTF Cameras from model file (if model node provided and has cameras)
-    if (modelNode && !modelNode->gltfCameras.empty()) {
+    const CachedModel* cached = modelNode ? modelNode->getCachedModel() : nullptr;
+    if (cached && !cached->cameras.empty()) {
         // Auto-apply GLTF camera on first render after model load
         if (modelNode->needsCameraApply && modelNode->selectedCameraIndex >= 0) {
             camera->applyGLTFCamera(
-                modelNode->gltfCameras[modelNode->selectedCameraIndex]
+                cached->cameras[modelNode->selectedCameraIndex]
             );
             modelNode->needsCameraApply = false;
         }
@@ -53,7 +55,7 @@ void CameraEditorUI::DrawOrbitalCamera(
             // Build camera names for combo box
             std::vector<const char*> cameraNames;
             cameraNames.push_back("Default Camera");
-            for (const auto& cam : modelNode->gltfCameras) {
+            for (const auto& cam : cached->cameras) {
                 cameraNames.push_back(cam.name.c_str());
             }
 
@@ -69,7 +71,7 @@ void CameraEditorUI::DrawOrbitalCamera(
                 // Auto-apply when selection changes
                 if (modelNode->selectedCameraIndex >= 0) {
                     camera->applyGLTFCamera(
-                        modelNode->gltfCameras[modelNode->selectedCameraIndex]
+                        cached->cameras[modelNode->selectedCameraIndex]
                     );
                 }
             }
@@ -77,7 +79,7 @@ void CameraEditorUI::DrawOrbitalCamera(
             // Show selected camera info from GLTF file
             if (modelNode->selectedCameraIndex >= 0) {
                 const auto& cam =
-                    modelNode->gltfCameras[modelNode->selectedCameraIndex];
+                    cached->cameras[modelNode->selectedCameraIndex];
                 ImGui::TextColored(
                     ImVec4(0.7f, 0.9f, 0.7f, 1.0f), "GLTF Camera: %s",
                     cam.name.c_str()
@@ -193,11 +195,12 @@ void CameraEditorUI::DrawFPSCamera(
     ModelNode* modelNode
 ) {
     // GLTF Cameras from model file (if model node provided and has cameras)
-    if (modelNode && !modelNode->gltfCameras.empty()) {
+    const CachedModel* cached = modelNode ? modelNode->getCachedModel() : nullptr;
+    if (cached && !cached->cameras.empty()) {
         // Auto-apply GLTF camera on first render after model load
         if (modelNode->needsCameraApply && modelNode->selectedCameraIndex >= 0) {
             camera->applyGLTFCamera(
-                modelNode->gltfCameras[modelNode->selectedCameraIndex]
+                cached->cameras[modelNode->selectedCameraIndex]
             );
             modelNode->needsCameraApply = false;
         }
@@ -208,7 +211,7 @@ void CameraEditorUI::DrawFPSCamera(
             // Build camera names for combo box
             std::vector<const char*> cameraNames;
             cameraNames.push_back("Default Camera");
-            for (const auto& cam : modelNode->gltfCameras) {
+            for (const auto& cam : cached->cameras) {
                 cameraNames.push_back(cam.name.c_str());
             }
 
@@ -224,7 +227,7 @@ void CameraEditorUI::DrawFPSCamera(
                 // Auto-apply when selection changes
                 if (modelNode->selectedCameraIndex >= 0) {
                     camera->applyGLTFCamera(
-                        modelNode->gltfCameras[modelNode->selectedCameraIndex]
+                        cached->cameras[modelNode->selectedCameraIndex]
                     );
                 }
             }
@@ -232,7 +235,7 @@ void CameraEditorUI::DrawFPSCamera(
             // Show selected camera info from GLTF file
             if (modelNode->selectedCameraIndex >= 0) {
                 const auto& cam =
-                    modelNode->gltfCameras[modelNode->selectedCameraIndex];
+                    cached->cameras[modelNode->selectedCameraIndex];
                 ImGui::TextColored(
                     ImVec4(0.7f, 0.9f, 0.7f, 1.0f), "GLTF Camera: %s",
                     cam.name.c_str()

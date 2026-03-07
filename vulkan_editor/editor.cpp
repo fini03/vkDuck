@@ -1,12 +1,15 @@
 #include "editor.h"
+#include "asset/model_manager.h"
 #include "io/file_generator.h"
 #include "util/logger.h"
 #include "io/graph_serializer.h"
 #include "external/SimpleFileDialog.h"
 #include "graph/fixed_camera_node.h"
 #include "graph/fps_camera_node.h"
+#include "graph/model_node.h"
 #include "graph/node_graph.h"
 #include "shader/shader_manager.h"
+#include "asset/asset_library_ui.h"
 #include "ui/camera_editor_ui.h"
 #include "ui/debug_console_ui.h"
 #include "ui/light_editor_ui.h"
@@ -42,6 +45,21 @@ Editor::Editor(
     pipeline_state = std::make_unique<PipelineState>();
     shader_manager = std::make_unique<ShaderManager>();
     pipeline_settings_ui = std::make_unique<PipelineSettingsUI>();
+    pipelineEditor = std::make_unique<PipelineEditorUI>(*graph);
+
+    // Initialize global ModelManager pointer
+    g_modelManager = &modelManager;
+
+    // Set up Asset Library callback to assign models to selected model node
+    AssetLibraryUI::setModelSelectedCallback([this](ModelHandle handle) {
+        ModelNode* selectedModelNode = pipelineEditor->getSelectedModelNode();
+        if (selectedModelNode && g_modelManager->isLoaded(handle)) {
+            selectedModelNode->setModel(handle);
+            Log::info("Editor", "Assigned model to selected node");
+        } else if (!selectedModelNode) {
+            Log::warning("Editor", "No model node selected - select a Model Node first");
+        }
+    });
 }
 
 void Editor::rebuildLiveViewPrimitives() {
@@ -331,6 +349,11 @@ void Editor::start() {
             ImGui::EndTabItem();
         }
 
+        if (ImGui::BeginTabItem("Asset Library")) {
+            AssetLibraryUI::Draw();
+            ImGui::EndTabItem();
+        }
+
         if (ImGui::BeginTabItem("Live View")) {
             showLiveView();
             ImGui::EndTabItem();
@@ -423,7 +446,10 @@ void Editor::renderPopupNotifications() {
     }
 }
 
-void Editor::update() {}
+void Editor::update() {
+    // Process any pending model reloads from file watchers
+    g_modelManager->processPendingReloads();
+}
 
 void Editor::showGlobalSettingsView() {
     ImGui::TextColored(
@@ -478,7 +504,9 @@ void Editor::showGlobalSettingsView() {
                 projectRoot = root;
                 shader_manager->setProjectRoot(root);
                 Logger::instance().setProjectRoot(root);
+                g_modelManager->setProjectRoot(root);
                 shader_manager->scanShaders();
+                g_modelManager->scanModels();
                 projectSelected = true;
             }
         }
@@ -516,6 +544,8 @@ void Editor::askForProjectRoot() {
                 projectRoot = root;
                 shader_manager->setProjectRoot(root);
                 Logger::instance().setProjectRoot(root);
+                g_modelManager->setProjectRoot(root);
+                g_modelManager->scanModels();
                 projectSelected = true;
 
                 ImGui::CloseCurrentPopup();
@@ -527,10 +557,8 @@ void Editor::askForProjectRoot() {
 }
 
 void Editor::showPipelineView() {
-    static PipelineEditorUI pipelineEditor(*graph);
-
     if (pendingSavePositionSync) {
-        pipelineEditor.SyncNodePositionsFromEditor();
+        pipelineEditor->SyncNodePositionsFromEditor();
         pipeline_state->save(*graph, pendingSavePath.string());
         shader_manager->scanStates();
         pendingSavePositionSync = false;
@@ -538,13 +566,13 @@ void Editor::showPipelineView() {
     }
 
     if (pendingLoadPositionSync) {
-        pipelineEditor.ClearSelection();
-        pipelineEditor.ApplyNodePositionsToEditor();
+        pipelineEditor->ClearSelection();
+        pipelineEditor->ApplyNodePositionsToEditor();
         pendingLoadPositionSync = false;
     }
 
     shader_manager->processPendingReloads(*graph);
-    pipelineEditor.draw(
+    pipelineEditor->draw(
         shader_manager.get(), pipeline_settings_ui.get()
     );
 }

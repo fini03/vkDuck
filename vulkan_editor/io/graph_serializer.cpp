@@ -256,23 +256,20 @@ std::unique_ptr<Node> NodeFactory::createFromJson(
         auto modelNode = std::make_unique<ModelNode>(id);
         modelNode->fromJson(jNode);
 
-        // Load model - stored path is relative to project root
+        // Load model via ModelManager - stored path is relative to project root
         if (modelNode->settings.modelPath[0] != '\0') {
             namespace fs = std::filesystem;
             fs::path relativePath = modelNode->settings.modelPath;
-            fs::path projectRoot = shader_manager.getProjectRoot();
-            fs::path absolutePath = projectRoot / relativePath;
 
             Log::debug(
                 "PipelineState",
-                "Loading model - relative: {}, absolute: {}",
-                relativePath.string(),
-                absolutePath.string()
+                "Loading model via ModelManager: {}",
+                relativePath.string()
             );
 
             // Store the saved camera selection before loading (loadModel resets it)
             int savedCameraIndex = modelNode->selectedCameraIndex;
-            modelNode->loadModel(absolutePath, projectRoot);
+            modelNode->loadModel(relativePath);
             // Restore camera selection after model load
             modelNode->selectedCameraIndex = savedCameraIndex;
         }

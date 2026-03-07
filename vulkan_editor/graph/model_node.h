@@ -1,8 +1,7 @@
 #pragma once
-#include "../io/model_watcher.h"
+#include "../asset/model_manager.h"
 #include "node.h"
 #include "pin_registry.h"
-#include "vulkan/vulkan.h"
 #include "vulkan_editor/io/serialization.h"
 #include <filesystem>
 #include <glm/glm.hpp>
@@ -11,69 +10,10 @@
 #include <nlohmann/json.hpp>
 #include <string>
 
-// Use shared types from vkDuck library
-#include <vkDuck/model_loader.h>
-
 using namespace ShaderTypes;
 
-// Editor-specific types (renamed to avoid conflicts with vkDuck types)
-struct EditorImage {
-    std::filesystem::path path{};
-    void* pixels{nullptr};
-    bool toLoad{false};
-
-    uint32_t width;
-    uint32_t height;
-
-    primitives::StoreHandle image{};
-
-    ~EditorImage();
-};
-
-struct EditorMaterial {
-    int baseTextureIndex{-1};
-};
-
-// Editor's GeometryRange includes topology field (vkDuck's doesn't)
-struct EditorGeometryRange {
-    uint32_t firstVertex;
-    uint32_t vertexCount;
-    uint32_t firstIndex;
-    uint32_t indexCount;
-    int materialIndex;
-    VkPrimitiveTopology topology;
-};
-
-struct ConsolidatedModelData {
-    std::vector<Vertex> vertices;
-    std::vector<uint32_t> indices;
-    std::vector<EditorGeometryRange> ranges;
-
-    VkBuffer vertexBuffer = VK_NULL_HANDLE;
-    VmaAllocation vertexBufferAllocation = VK_NULL_HANDLE;
-    VkBuffer indexBuffer = VK_NULL_HANDLE;
-    VmaAllocation indexBufferAllocation = VK_NULL_HANDLE;
-
-    void clear() {
-        vertices.clear();
-        indices.clear();
-        ranges.clear();
-        vertexBuffer = VK_NULL_HANDLE;
-        vertexBufferAllocation = VK_NULL_HANDLE;
-        indexBuffer = VK_NULL_HANDLE;
-        indexBufferAllocation = VK_NULL_HANDLE;
-    }
-
-    size_t getTotalVertexCount() const {
-        return vertices.size();
-    }
-    size_t getTotalIndexCount() const {
-        return indices.size();
-    }
-    size_t getGeometryCount() const {
-        return ranges.size();
-    }
-};
+// EditorImage, EditorMaterial, EditorGeometryRange, ConsolidatedModelData
+// are now defined in model_manager.h to avoid circular dependencies
 
 struct ModelMatrices {
     alignas(16) glm::mat4 model{1.0f};
@@ -133,10 +73,11 @@ private:
 
 /**
  * @class ModelNode
- * @brief Loads and manages 3D models (glTF/OBJ) for rendering in the pipeline.
+ * @brief References a cached 3D model for rendering in the pipeline.
  *
- * Handles model loading, texture management, transform matrices, and optional
- * embedded camera extraction from glTF files. Supports file watching for auto-reload.
+ * Uses ModelManager for loading and caching models. Handles per-node
+ * settings like topology override, camera/light selection, and transform
+ * matrices. File watching is managed by ModelManager.
  */
 class ModelNode : public Node, public ISerializable {
 public:
@@ -166,7 +107,37 @@ public:
     void registerPins(PinRegistry& registry) override;
     bool usesPinRegistry() const override { return usesRegistry; }
 
-    void loadModel(const std::filesystem::path& path, const std::filesystem::path& projectRoot = "");
+    /**
+     * @brief Load a model via ModelManager.
+     *
+     * The model is loaded and cached by ModelManager. This node
+     * stores a handle to the cached model.
+     *
+     * @param relativePath Path relative to project root
+     */
+    void loadModel(const std::filesystem::path& relativePath);
+
+    /**
+     * @brief Set model from an existing ModelHandle.
+     *
+     * Useful when selecting a model from the Asset Library.
+     */
+    void setModel(ModelHandle handle);
+
+    /**
+     * @brief Get the current model handle.
+     */
+    ModelHandle getModelHandle() const { return modelHandle_; }
+
+    /**
+     * @brief Check if a model is loaded and ready.
+     */
+    bool hasModel() const;
+
+    /**
+     * @brief Get the cached model data (read-only).
+     */
+    const CachedModel* getCachedModel() const;
 
     static const std::vector<const char*> topologyOptions;
     ModelSettings settings;
@@ -185,10 +156,7 @@ public:
     PinHandle cameraPinHandle = INVALID_PIN_HANDLE;
     PinHandle lightPinHandle = INVALID_PIN_HANDLE;
 
-    std::vector<EditorMaterial> materials;
-    std::vector<EditorImage> images;
-
-    std::vector<GLTFCamera> gltfCameras;
+    // Per-node camera selection (indexes into cached model's cameras)
     int selectedCameraIndex{-1};
     bool needsCameraApply{false};
     ModelCameraData cameraData;
@@ -196,23 +164,11 @@ public:
 
     void updateCameraFromSelection();
 
-    std::vector<GLTFLight> gltfLights;
-    int selectedLightIndex{-1};  // For UI display purposes
-    primitives::LightsBuffer lightsBuffer;  // All lights for shader (dynamic size)
+    // Per-node light selection (indexes into cached model's lights)
+    int selectedLightIndex{-1};
+    primitives::LightsBuffer lightsBuffer;
 
     void updateLightsFromGLTF();
-
-    void setFileWatchingEnabled(bool enabled);
-    bool isFileWatchingEnabled() const;
-    ModelFileWatcher::LoadingState getLoadingState() const;
-    const std::string& getLastError() const;
-    bool needsReload() const { return pendingReload; }
-    void clearReloadFlag() { pendingReload = false; }
-    void reloadModel();
-
-    std::filesystem::path projectRoot;
-
-    ConsolidatedModelData modelData;
     void clearPrimitives() override;
     void createPrimitives(primitives::Store& store) override;
     virtual void getOutputPrimitives(
@@ -224,10 +180,13 @@ public:
 
 private:
     void createDefaultPins();
+    void onModelReloaded();
     bool usesRegistry = false;
 
-    EditorImage defaultTexture{};
+    // Handle to cached model in ModelManager
+    ModelHandle modelHandle_;
 
+    // GPU primitive handles (created per-node instance)
     primitives::StoreHandle baseTextureArray{};
     primitives::StoreHandle vertexDataArray{};
     primitives::StoreHandle modelMatrixArray{};
@@ -237,10 +196,6 @@ private:
     primitives::StoreHandle lightUboArray{};
     primitives::UniformBuffer* lightUbo{nullptr};
 
+    // Per-node model matrices (allows different transforms per node)
     std::vector<ModelMatrices> modelMatricesData;
-
-    std::unique_ptr<ModelFileWatcher> fileWatcher;
-    bool fileWatchingEnabled{true};
-    bool pendingReload{false};
-    std::string currentModelPath;
 };

@@ -3,11 +3,9 @@
 #include "vulkan_editor/util/logger.h"
 #include <cmath>
 #include <cstring>
-#include <future>
 #include <imgui.h>
 #include <imgui_node_editor.h>
 #include <set>
-#include <thread>
 #include <vulkan/vk_enum_string_helper.h>
 
 // Use vkDuck's shared implementations
@@ -25,10 +23,10 @@
 
 #include "external/utilities/builders.h"
 #include "external/utilities/widgets.h"
-#include <imgui.h>
 
 namespace {
 constexpr float PADDING_X = 10.0f;
+constexpr const char* LOG_CATEGORY = "ModelNode";
 }
 namespace ed = ax::NodeEditor;
 namespace fs = std::filesystem;
@@ -54,63 +52,26 @@ const std::vector<const char*> ModelNode::topologyOptions =
         topologyOptionsEnum, string_VkPrimitiveTopology
     );
 
-// Parallel image loading result (uses vkDuck's imageLoad)
-struct DecodedImageResult {
-    void* pixels{nullptr};
-    uint32_t width{0};
-    uint32_t height{0};
-    size_t index{0};
-    bool success{false};
-};
-
-// Load a single image (for use in parallel)
-static DecodedImageResult loadSingleImage(const fs::path& path, size_t index) {
-    DecodedImageResult result;
-    result.index = index;
-    result.pixels = imageLoad(path, result.width, result.height);
-    result.success = (result.pixels != nullptr);
-    return result;
-}
-
-// Load multiple images in parallel using std::async
-static std::vector<DecodedImageResult> loadImagesParallel(
-    const std::vector<std::pair<size_t, fs::path>>& imagesToLoad
-) {
-    std::vector<std::future<DecodedImageResult>> futures;
-    futures.reserve(imagesToLoad.size());
-
-    for (const auto& [index, path] : imagesToLoad) {
-        futures.push_back(std::async(std::launch::async, loadSingleImage, path, index));
-    }
-
-    std::vector<DecodedImageResult> results;
-    results.reserve(futures.size());
-    for (auto& future : futures) {
-        results.push_back(future.get());
-    }
-    return results;
-}
-
-EditorImage::~EditorImage() {
-    if (pixels)
-        imageFree(pixels);
-}
+// EditorImage destructor is now in model_manager.cpp
 
 ModelNode::ModelNode()
     : Node() {
     name = "Model";
     createDefaultPins();
-    fileWatcher = std::make_unique<ModelFileWatcher>();
 }
 
 ModelNode::ModelNode(int id)
     : Node(id) {
     name = "Model";
     createDefaultPins();
-    fileWatcher = std::make_unique<ModelFileWatcher>();
 }
 
-ModelNode::~ModelNode() {}
+ModelNode::~ModelNode() {
+    // Release reference to cached model (check for null during shutdown)
+    if (modelHandle_.isValid() && g_modelManager) {
+        g_modelManager->removeReference(modelHandle_);
+    }
+}
 
 nlohmann::json ModelNode::toJson() const {
     nlohmann::json j;
@@ -263,16 +224,19 @@ void ModelNode::registerPins(PinRegistry& registry) {
 
 void ModelNode::render(
     ax::NodeEditor::Utilities::BlueprintNodeBuilder& builder,
-    const NodeGraph& graph
+    const NodeGraph& nodeGraph
 ) const {
+    // Get cached model to check for cameras/lights
+    const CachedModel* cached = getCachedModel();
+
     // Calculate node width - only include camera/light pins if model has them
     std::vector<std::string> pinLabels = {
         vertexDataPin.label, modelMatrixPin.label, texturePin.label
     };
-    if (!gltfCameras.empty()) {
+    if (cached && !cached->cameras.empty()) {
         pinLabels.push_back(cameraPin.label);
     }
-    if (!gltfLights.empty()) {
+    if (cached && !cached->lights.empty()) {
         pinLabels.push_back(lightPin.label);
     }
     float nodeWidth = CalculateNodeWidth(name, pinLabels);
@@ -328,35 +292,35 @@ void ModelNode::render(
     DrawOutputPin(
         vertexDataPin.id, vertexDataPin.label,
         static_cast<int>(vertexDataPin.type),
-        graph.isPinLinked(vertexDataPin.id), nodeWidth, builder
+        nodeGraph.isPinLinked(vertexDataPin.id), nodeWidth, builder
     );
 
     DrawOutputPin(
         modelMatrixPin.id, modelMatrixPin.label,
         static_cast<int>(modelMatrixPin.type),
-        graph.isPinLinked(modelMatrixPin.id), nodeWidth, builder
+        nodeGraph.isPinLinked(modelMatrixPin.id), nodeWidth, builder
     );
 
     DrawOutputPin(
         texturePin.id, texturePin.label,
-        static_cast<int>(texturePin.type), graph.isPinLinked(texturePin.id),
+        static_cast<int>(texturePin.type), nodeGraph.isPinLinked(texturePin.id),
         nodeWidth, builder
     );
 
     // Only show camera pin if model has GLTF cameras
-    if (!gltfCameras.empty()) {
+    if (cached && !cached->cameras.empty()) {
         DrawOutputPin(
             cameraPin.id, cameraPin.label,
-            static_cast<int>(cameraPin.type), graph.isPinLinked(cameraPin.id),
+            static_cast<int>(cameraPin.type), nodeGraph.isPinLinked(cameraPin.id),
             nodeWidth, builder
         );
     }
 
     // Only show light pin if model has GLTF lights
-    if (!gltfLights.empty()) {
+    if (cached && !cached->lights.empty()) {
         DrawOutputPin(
             lightPin.id, lightPin.label,
-            static_cast<int>(lightPin.type), graph.isPinLinked(lightPin.id),
+            static_cast<int>(lightPin.type), nodeGraph.isPinLinked(lightPin.id),
             nodeWidth, builder
         );
     }
@@ -365,178 +329,122 @@ void ModelNode::render(
     ed::PopStyleColor();
 }
 
-void ModelNode::loadModel(
-    const std::filesystem::path& path,
-    const std::filesystem::path& projRoot
-) {
-    auto totalStart = std::chrono::high_resolution_clock::now();
-    Log::info("Model", "Loading model from: {}", path.string());
+void ModelNode::loadModel(const std::filesystem::path& relativePath) {
+    // Release previous model reference if any
+    if (modelHandle_.isValid()) {
+        g_modelManager->removeReference(modelHandle_);
+        modelHandle_ = {};
+    }
 
-    // Clear existing data
-    materials.clear();
-    images.clear();
-    modelData.clear();
-    gltfCameras.clear();
-    gltfLights.clear();
+    // Reset per-node state
     selectedCameraIndex = -1;
     selectedLightIndex = -1;
-    defaultTexture = {.path = projRoot / "data" / "images" / "default.png"};
+    needsCameraApply = false;
 
-    // Use vkDuck library's loadModel for all the heavy lifting
-    // (GLTF parsing, SIMD index conversion, camera extraction, texture path resolution)
-    ModelData libModelData = ::loadModel(path.string(), projRoot.string());
+    // Load via ModelManager
+    ModelHandle newHandle = g_modelManager->loadModel(relativePath);
 
-    if (libModelData.vertices.empty()) {
-        Log::error("Model", "Failed to load model or model is empty");
+    if (!g_modelManager->isLoaded(newHandle)) {
+        Log::error(LOG_CATEGORY, "Failed to load model: {}", relativePath.string());
         return;
     }
 
-    // Copy consolidated geometry data directly to modelData
-    modelData.vertices = std::move(libModelData.vertices);
-    modelData.indices = std::move(libModelData.indices);
+    // Store handle and add reference
+    modelHandle_ = newHandle;
+    g_modelManager->addReference(modelHandle_);
 
-    // Convert GeometryRange to EditorGeometryRange (add topology field)
-    VkPrimitiveTopology defaultTopology = topologyOptionsEnum[settings.topology];
-    modelData.ranges.reserve(libModelData.ranges.size());
-    for (const auto& range : libModelData.ranges) {
-        EditorGeometryRange editorRange;
-        editorRange.firstVertex = range.firstVertex;
-        editorRange.vertexCount = range.vertexCount;
-        editorRange.firstIndex = range.firstIndex;
-        editorRange.indexCount = range.indexCount;
-        editorRange.materialIndex = range.materialIndex;
-        editorRange.topology = defaultTopology;
-        modelData.ranges.push_back(editorRange);
-    }
+    // Update settings path
+    std::strncpy(settings.modelPath, relativePath.string().c_str(), sizeof(settings.modelPath) - 1);
+    settings.modelPath[sizeof(settings.modelPath) - 1] = '\0';
 
-    // Copy cameras from library
-    gltfCameras = std::move(libModelData.cameras);
+    // Initialize per-node state from cached model
+    const CachedModel* cached = g_modelManager->getModel(modelHandle_);
+    if (cached) {
+        if (!cached->cameras.empty()) {
+            selectedCameraIndex = 0;
+            needsCameraApply = true;
+        }
+        if (!cached->lights.empty()) {
+            selectedLightIndex = 0;
+        }
 
-    if (!gltfCameras.empty()) {
         Log::info(
-            "Model", "Found {} camera(s) in GLTF file",
-            gltfCameras.size()
-        );
-        selectedCameraIndex = 0; // Select first camera by default
-        needsCameraApply = true; // Trigger auto-apply when camera UI is shown
-    }
-
-    // Copy lights from library
-    gltfLights = std::move(libModelData.lights);
-
-    if (!gltfLights.empty()) {
-        Log::info(
-            "Model", "Found {} light(s) in GLTF file",
-            gltfLights.size()
-        );
-        selectedLightIndex = 0; // Select first light by default
-    }
-
-    // Set up images and materials based on texture paths from library
-    // The library provides one texture path per material
-    materials.resize(libModelData.texturePaths.size());
-    images.resize(libModelData.texturePaths.size());
-
-    for (size_t i = 0; i < libModelData.texturePaths.size(); ++i) {
-        const auto& texPath = libModelData.texturePaths[i];
-        if (!texPath.empty()) {
-            images[i].path = texPath;
-            images[i].toLoad = true;
-            materials[i].baseTextureIndex = static_cast<int>(i);
-        } else {
-            materials[i].baseTextureIndex = -1;
-        }
-    }
-
-    // Load default texture first so we can use it as a fallback
-    Log::debug(
-        "Model", "Loading default texture {}",
-        defaultTexture.path.string()
-    );
-    defaultTexture.pixels = imageLoad(
-        defaultTexture.path, defaultTexture.width, defaultTexture.height
-    );
-    if (defaultTexture.pixels == nullptr) {
-        Log::error(
-            "Model", "Failed to load default texture: {}",
-            defaultTexture.path.string()
-        );
-    }
-
-    // Load textures in parallel (async)
-    {
-        auto t1 = std::chrono::high_resolution_clock::now();
-
-        // Collect images that need to be loaded
-        std::vector<std::pair<size_t, fs::path>> imagesToLoad;
-        for (size_t i = 0; i < images.size(); ++i) {
-            if (images[i].toLoad) {
-                imagesToLoad.push_back({i, images[i].path});
-            }
-        }
-
-        // Load images in parallel
-        if (!imagesToLoad.empty()) {
-            Log::debug("Model", "Loading {} images in parallel...", imagesToLoad.size());
-            auto results = loadImagesParallel(imagesToLoad);
-
-            for (const auto& result : results) {
-                images[result.index].pixels = result.pixels;
-                images[result.index].width = result.width;
-                images[result.index].height = result.height;
-
-                if (!result.success) {
-                    Log::warning(
-                        "Model",
-                        "Failed to load texture: {}, using default texture",
-                        images[result.index].path.string()
-                    );
-                }
-            }
-        }
-
-        auto t2 = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double, std::milli> ms_double = t2 - t1;
-        Log::debug(
-            "Model", "Image loading took {}ms (parallel)", ms_double.count()
-        );
-    }
-
-    Log::info(
-        "Model",
-        "Loaded model: {} total vertices, {} total indices, {} geometry ranges",
-        modelData.getTotalVertexCount(), modelData.getTotalIndexCount(),
-        modelData.getGeometryCount()
-    );
-
-    auto totalEnd = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> totalMs = totalEnd - totalStart;
-    Log::info("Model", "Total loading time: {:.1f}ms", totalMs.count());
-
-    // Store the model path and project root for potential reload
-    currentModelPath = path.string();
-    this->projectRoot = projRoot;
-
-    // Set up file watcher for auto-reload
-    if (fileWatcher && fileWatchingEnabled) {
-        fileWatcher->setReloadCallback([this](
-                                           const std::string& filepath
-                                       ) {
-            Log::info(
-                "Model", "Detected change in model file: {}", filepath
-            );
-            pendingReload = true;
-        });
-        fileWatcher->watchFile(path.string());
-        fileWatcher->setLoadingState(
-            ModelFileWatcher::LoadingState::Loaded
+            LOG_CATEGORY,
+            "Model '{}' loaded: {} vertices, {} indices, {} geometries",
+            cached->displayName,
+            cached->modelData.getTotalVertexCount(),
+            cached->modelData.getTotalIndexCount(),
+            cached->modelData.getGeometryCount()
         );
     }
 }
 
+void ModelNode::setModel(ModelHandle handle) {
+    if (!g_modelManager->isLoaded(handle)) {
+        Log::warning(LOG_CATEGORY, "Cannot set model: handle not loaded");
+        return;
+    }
+
+    // Release previous model reference
+    if (modelHandle_.isValid()) {
+        g_modelManager->removeReference(modelHandle_);
+    }
+
+    // Set new handle and add reference
+    modelHandle_ = handle;
+    g_modelManager->addReference(modelHandle_);
+
+    // Reset per-node state
+    selectedCameraIndex = -1;
+    selectedLightIndex = -1;
+    needsCameraApply = false;
+
+    // Initialize from cached model
+    const CachedModel* cached = g_modelManager->getModel(modelHandle_);
+    if (cached) {
+        std::strncpy(settings.modelPath, cached->path.string().c_str(), sizeof(settings.modelPath) - 1);
+        settings.modelPath[sizeof(settings.modelPath) - 1] = '\0';
+
+        if (!cached->cameras.empty()) {
+            selectedCameraIndex = 0;
+            needsCameraApply = true;
+        }
+        if (!cached->lights.empty()) {
+            selectedLightIndex = 0;
+        }
+
+        Log::info(LOG_CATEGORY, "Model set to '{}'", cached->displayName);
+    }
+}
+
+bool ModelNode::hasModel() const {
+    return modelHandle_.isValid() && g_modelManager->isLoaded(modelHandle_);
+}
+
+const CachedModel* ModelNode::getCachedModel() const {
+    if (!modelHandle_.isValid()) {
+        return nullptr;
+    }
+    return g_modelManager->getModel(modelHandle_);
+}
+
+void ModelNode::onModelReloaded() {
+    // Called when ModelManager reloads our model
+    // Preserve camera/light selections if still valid
+    const CachedModel* cached = getCachedModel();
+    if (!cached) return;
+
+    if (selectedCameraIndex >= static_cast<int>(cached->cameras.size())) {
+        selectedCameraIndex = cached->cameras.empty() ? -1 : 0;
+    }
+    if (selectedLightIndex >= static_cast<int>(cached->lights.size())) {
+        selectedLightIndex = cached->lights.empty() ? -1 : 0;
+    }
+
+    Log::info(LOG_CATEGORY, "Model reloaded, selections preserved");
+}
+
 void ModelNode::clearPrimitives() {
-    for (auto& image : images)
-        image.image = {};
     baseTextureArray = {};
     vertexDataArray = {};
     modelMatrixArray = {};
@@ -544,20 +452,36 @@ void ModelNode::clearPrimitives() {
     cameraUbo = nullptr;
     lightUboArray = {};
     lightUbo = nullptr;
+    modelMatricesData.clear();
 }
 
 void ModelNode::createPrimitives(primitives::Store& store) {
+    const CachedModel* cached = getCachedModel();
+    if (!cached) {
+        Log::warning(LOG_CATEGORY, "Cannot create primitives: no model loaded");
+        return;
+    }
+
+    const auto& modelData = cached->modelData;
+    const auto& images = cached->images;
+    const auto& materials = cached->materials;
+
     primitives::StoreHandle textureNotFound{};
-    auto createNewDefaultTexture = [this, &store]() -> auto {
+
+    // Helper to create default texture primitive
+    auto createNewDefaultTexture = [&cached, &store]() -> primitives::StoreHandle {
+        if (!cached->defaultTexture.pixels) {
+            return {};
+        }
         auto texture = store.newImage();
         auto& storeImage = store.images[texture.handle];
-        storeImage.imageData = defaultTexture.pixels;
+        storeImage.imageData = const_cast<void*>(static_cast<const void*>(cached->defaultTexture.pixels));
         storeImage.imageSize =
-            defaultTexture.width * defaultTexture.height * 4;
+            cached->defaultTexture.width * cached->defaultTexture.height * 4;
         storeImage.extentType = ExtentType::Custom;
         storeImage.imageInfo.format = VK_FORMAT_B8G8R8A8_SRGB;
-        storeImage.imageInfo.extent.width = defaultTexture.width;
-        storeImage.imageInfo.extent.height = defaultTexture.height;
+        storeImage.imageInfo.extent.width = cached->defaultTexture.width;
+        storeImage.imageInfo.extent.height = cached->defaultTexture.height;
         storeImage.imageInfo.extent.depth = 1;
         storeImage.imageInfo.usage =
             VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -566,24 +490,27 @@ void ModelNode::createPrimitives(primitives::Store& store) {
         return texture;
     };
 
-    for (auto& image : images) {
-        // We don't want to create primitives for images we didn't
-        // even load in the first place...
+    // Create image primitives from cached images
+    // We need to store handles for each image
+    std::vector<primitives::StoreHandle> imageHandles(images.size());
+
+    for (size_t i = 0; i < images.size(); ++i) {
+        const auto& image = images[i];
+
         if (!image.toLoad)
             continue;
 
-        // If we didn't successfully load the image, just pass the
-        // handle to the default texture instead
+        // If image failed to load, use default texture
         if (image.pixels == nullptr) {
             if (!textureNotFound.isValid())
                 textureNotFound = createNewDefaultTexture();
-            image.image = textureNotFound;
-            //continue;
+            imageHandles[i] = textureNotFound;
+            continue;
         }
 
-        image.image = store.newImage();
-        auto& storeImage = store.images[image.image.handle];
-        storeImage.imageData = image.pixels;
+        imageHandles[i] = store.newImage();
+        auto& storeImage = store.images[imageHandles[i].handle];
+        storeImage.imageData = const_cast<void*>(static_cast<const void*>(image.pixels));
         storeImage.imageSize = image.width * image.height * 4;
         storeImage.extentType = ExtentType::Custom;
         storeImage.imageInfo.format = VK_FORMAT_B8G8R8A8_SRGB;
@@ -594,85 +521,68 @@ void ModelNode::createPrimitives(primitives::Store& store) {
             VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
         storeImage.viewInfo.subresourceRange.aspectMask =
             VK_IMAGE_ASPECT_COLOR_BIT;
-        // Store original image path for code generation (wuffs loading)
         storeImage.originalImagePath = image.path.generic_string();
     }
 
+    // Create texture array for geometry ranges
     baseTextureArray = store.newArray();
-    auto& array = store.arrays[baseTextureArray.handle];
-    array.type = primitives::Type::Image;
+    auto& texArray = store.arrays[baseTextureArray.handle];
+    texArray.type = primitives::Type::Image;
+    texArray.handles.resize(modelData.ranges.size());
 
-    array.handles.resize(modelData.ranges.size());
-    auto handles = std::views::zip(array.handles, modelData.ranges);
-    for (auto&& [handle, range] : handles) {
+    for (size_t i = 0; i < modelData.ranges.size(); ++i) {
+        const auto& range = modelData.ranges[i];
         assert(range.materialIndex >= 0);
-        int img = materials[range.materialIndex].baseTextureIndex;
-        if (img < 0) {
-            // Only create a default texture if we actually need one
+        int imgIdx = materials[range.materialIndex].baseTextureIndex;
+
+        if (imgIdx < 0 || !imageHandles[imgIdx].isValid()) {
             if (!textureNotFound.isValid())
                 textureNotFound = createNewDefaultTexture();
-
-            handle = textureNotFound.handle;
+            texArray.handles[i] = textureNotFound.handle;
         } else {
-            assert(images[img].image.isValid());
-            handle = images[img].image.handle;
+            texArray.handles[i] = imageHandles[imgIdx].handle;
         }
     }
 
-    // TODO
+    // Create vertex data array
     vertexDataArray = store.newArray();
     auto& vertexArray = store.arrays[vertexDataArray.handle];
     vertexArray.type = primitives::Type::VertexData;
-
     vertexArray.handles.resize(modelData.ranges.size());
 
     for (size_t i = 0; i < modelData.ranges.size(); ++i) {
         const auto& range = modelData.ranges[i];
 
-        // Create a VertexData primitive for this geometry
         primitives::StoreHandle hVertexData = store.newVertexData();
-        primitives::VertexData& vertexData =
-            store.vertexDatas[hVertexData.handle];
+        primitives::VertexData& vertexData = store.vertexDatas[hVertexData.handle];
 
-        // Calculate spans for this specific geometry range
-        size_t vertexOffset = range.firstVertex * sizeof(Vertex);
         size_t vertexSize = range.vertexCount * sizeof(Vertex);
-        size_t indexOffset = range.firstIndex * sizeof(uint32_t);
         size_t indexSize = range.indexCount * sizeof(uint32_t);
 
-        // Set up vertex data span
-        uint8_t* vertexDataPtr = reinterpret_cast<uint8_t*>(
-            modelData.vertices.data() + range.firstVertex
+        // Set up vertex data span (const_cast needed for span from const data)
+        auto* vertexDataPtr = reinterpret_cast<uint8_t*>(
+            const_cast<Vertex*>(modelData.vertices.data() + range.firstVertex)
         );
-        vertexData.vertexData =
-            std::span<uint8_t>(vertexDataPtr, vertexSize);
+        vertexData.vertexData = std::span<uint8_t>(vertexDataPtr, vertexSize);
         vertexData.vertexDataSize = vertexSize;
         vertexData.vertexCount = range.vertexCount;
 
         // Set up index data span
-        uint32_t* indexDataPtr =
-            modelData.indices.data() + range.firstIndex;
-        vertexData.indexData =
-            std::span<uint32_t>(indexDataPtr, range.indexCount);
+        auto* indexDataPtr = const_cast<uint32_t*>(modelData.indices.data() + range.firstIndex);
+        vertexData.indexData = std::span<uint32_t>(indexDataPtr, range.indexCount);
         vertexData.indexDataSize = indexSize;
         vertexData.indexCount = range.indexCount;
 
-        // Set up vertex input descriptions
         vertexData.bindingDescription = Vertex::getBindingDescription();
-        vertexData.attributeDescriptions =
-            Vertex::getAttributeDescriptions();
-
-        // Set up model file path and geometry index for code generation
+        vertexData.attributeDescriptions = Vertex::getAttributeDescriptions();
         vertexData.modelFilePath = settings.modelPath;
         vertexData.geometryIndex = static_cast<uint32_t>(i);
 
-        // Store handle in array
         vertexArray.handles[i] = hVertexData.handle;
 
         Log::debug(
-            "Model",
-            "Created VertexData primitive for range {}: {} vertices, "
-            "{} indices",
+            LOG_CATEGORY,
+            "Created VertexData for range {}: {} verts, {} indices",
             i, range.vertexCount, range.indexCount
         );
     }
@@ -721,14 +631,11 @@ void ModelNode::createPrimitives(primitives::Store& store) {
         );
     }
 
-    // Create camera UBO if we have cameras
-    if (!gltfCameras.empty()) {
-        // Create UniformBuffer primitive for camera
+    // Create camera UBO if model has cameras
+    if (!cached->cameras.empty()) {
         primitives::StoreHandle hCameraUbo = store.newUniformBuffer();
         cameraUbo = &store.uniformBuffers[hCameraUbo.handle];
 
-        // Point to our persistent camera data
-        // TODO: Use the same struct as for other fixed camcam
         cameraUbo->dataType = primitives::UniformDataType::Camera;
         cameraUbo->data = std::span<uint8_t>(
             reinterpret_cast<uint8_t*>(&cameraData),
@@ -736,43 +643,34 @@ void ModelNode::createPrimitives(primitives::Store& store) {
         );
         cameraUbo->extraData = &cameraType;
 
-        // Create array with single Camera
         cameraUboArray = store.newArray();
         auto& camArray = store.arrays[cameraUboArray.handle];
         camArray.type = primitives::Type::UniformBuffer;
         camArray.handles = {hCameraUbo.handle};
 
-        // Update camera matrices now that UBO is set up
         updateCameraFromSelection();
 
-        Log::debug(
-            "ModelNode",
-            "Created camera UBO primitive for selected GLTF camera"
-        );
+        Log::debug(LOG_CATEGORY, "Created camera UBO primitive");
     }
 
-    // Create light UBO if we have lights
-    if (!gltfLights.empty()) {
-        // Convert all GLTF lights to shader-compatible format
+    // Create light UBO if model has lights
+    if (!cached->lights.empty()) {
         updateLightsFromGLTF();
 
-        // Create UniformBuffer primitive for lights
         primitives::StoreHandle hLightUbo = store.newUniformBuffer();
         lightUbo = &store.uniformBuffers[hLightUbo.handle];
 
-        // Point to our dynamic lights buffer (header + array)
         lightUbo->dataType = primitives::UniformDataType::Light;
         lightUbo->data = lightsBuffer.getSpan();
 
-        // Create array with single UBO containing all lights
         lightUboArray = store.newArray();
         auto& lgtArray = store.arrays[lightUboArray.handle];
         lgtArray.type = primitives::Type::UniformBuffer;
         lgtArray.handles = {hLightUbo.handle};
 
         Log::debug(
-            "ModelNode",
-            "Created light UBO with {} GLTF lights ({} bytes)",
+            LOG_CATEGORY,
+            "Created light UBO with {} lights ({} bytes)",
             lightsBuffer.header.numLights,
             lightUbo->data.size()
         );
@@ -801,19 +699,19 @@ void ModelNode::getOutputPrimitives(
 }
 
 void ModelNode::updateCameraFromSelection() {
+    const CachedModel* cached = getCachedModel();
+
     // Check if we have a valid camera selected
-    if (selectedCameraIndex < 0 ||
-        selectedCameraIndex >= static_cast<int>(gltfCameras.size())) {
+    if (!cached || selectedCameraIndex < 0 ||
+        selectedCameraIndex >= static_cast<int>(cached->cameras.size())) {
         // No camera selected - use default identity matrices
         cameraData.view = glm::mat4(1.0f);
         cameraData.invView = glm::mat4(1.0f);
         cameraData.proj = glm::mat4(1.0f);
-        // Note: UBO update is handled by Camera::recordCommands() for
-        // non-fixed cameras
         return;
     }
 
-    const GLTFCamera& gltfCam = gltfCameras[selectedCameraIndex];
+    const GLTFCamera& gltfCam = cached->cameras[selectedCameraIndex];
 
     // Compute view matrix from GLTF camera transform
     // GLTF cameras look down -Z in their local space
@@ -853,142 +751,33 @@ void ModelNode::updateCameraFromSelection() {
 }
 
 void ModelNode::updateLightsFromGLTF() {
-    // Resize to match GLTF lights (no limit)
+    const CachedModel* cached = getCachedModel();
+    if (!cached) return;
+
+    const auto& gltfLights = cached->lights;
+
+    // Resize to match GLTF lights
     lightsBuffer.lights.resize(gltfLights.size());
 
     for (size_t i = 0; i < gltfLights.size(); ++i) {
         const auto& gltfLight = gltfLights[i];
         auto& light = lightsBuffer.lights[i];
 
-        // Convert GLTF light to shader-compatible format
         light.position = gltfLight.position;
-
-        // Use range as radius, or default to 10.0 if infinite (range=0)
         light.radius = gltfLight.range > 0.0f ? gltfLight.range : 10.0f;
-
-        // Pass color and intensity separately
         light.color = gltfLight.color;
         light.intensity = gltfLight.intensity;
 
         Log::debug(
-            "ModelNode",
-            "Converted GLTF light '{}' - Pos: ({:.2f}, {:.2f}, {:.2f}), "
-            "Radius: {:.2f}, Color: ({:.2f}, {:.2f}, {:.2f}), Intensity: {:.2f}",
+            LOG_CATEGORY,
+            "Light '{}' - Pos: ({:.2f}, {:.2f}, {:.2f}), Intensity: {:.2f}",
             gltfLight.name,
             light.position.x, light.position.y, light.position.z,
-            light.radius,
-            light.color.r, light.color.g, light.color.b,
             light.intensity
         );
     }
 
-    // Build the combined GPU buffer (header + lights array)
     lightsBuffer.updateGpuBuffer();
 }
 
-// ============================================================================
-// File Watcher Integration
-// ============================================================================
-
-void ModelNode::setFileWatchingEnabled(bool enabled) {
-    fileWatchingEnabled = enabled;
-
-    if (fileWatcher) {
-        if (enabled && !currentModelPath.empty()) {
-            // Set up callback and start watching
-            fileWatcher->setReloadCallback(
-                [this](const std::string& filepath) {
-                    Log::info(
-                        "Model", "Detected change in model file: {}",
-                        filepath
-                    );
-                    pendingReload = true;
-                }
-            );
-            fileWatcher->watchFile(currentModelPath);
-            Log::info(
-                "Model", "File watching enabled for: {}",
-                currentModelPath
-            );
-        } else if (!enabled) {
-            fileWatcher->stopWatching();
-            Log::info("Model", "File watching disabled");
-        }
-    }
-}
-
-bool ModelNode::isFileWatchingEnabled() const {
-    return fileWatchingEnabled && fileWatcher &&
-           fileWatcher->isWatching();
-}
-
-ModelFileWatcher::LoadingState ModelNode::getLoadingState() const {
-    if (fileWatcher) {
-        return fileWatcher->getLoadingState();
-    }
-    return ModelFileWatcher::LoadingState::Idle;
-}
-
-const std::string& ModelNode::getLastError() const {
-    static std::string emptyError;
-    if (fileWatcher) {
-        return fileWatcher->getLastError();
-    }
-    return emptyError;
-}
-
-void ModelNode::reloadModel() {
-    if (currentModelPath.empty()) {
-        Log::warning("Model", "Cannot reload: no model path set");
-        return;
-    }
-
-    Log::info("Model", "Reloading model from: {}", currentModelPath);
-
-    if (fileWatcher) {
-        fileWatcher->setLoadingState(
-            ModelFileWatcher::LoadingState::Loading
-        );
-    }
-
-    try {
-        // Store current state that should persist across reload
-        int savedCameraIndex = selectedCameraIndex;
-        bool savedNeedsCameraApply = needsCameraApply;
-        int savedLightIndex = selectedLightIndex;
-
-        // Reload the model
-        loadModel(std::filesystem::path(currentModelPath), projectRoot);
-
-        // Restore camera selection if it's still valid
-        if (savedCameraIndex >= 0 &&
-            savedCameraIndex < static_cast<int>(gltfCameras.size())) {
-            selectedCameraIndex = savedCameraIndex;
-            needsCameraApply = savedNeedsCameraApply;
-        }
-
-        // Restore light selection if it's still valid
-        if (savedLightIndex >= 0 &&
-            savedLightIndex < static_cast<int>(gltfLights.size())) {
-            selectedLightIndex = savedLightIndex;
-        }
-
-        if (fileWatcher) {
-            fileWatcher->setLoadingState(
-                ModelFileWatcher::LoadingState::Loaded
-            );
-        }
-
-        Log::info("Model", "Model reloaded successfully");
-    } catch (const std::exception& e) {
-        Log::error("Model", "Failed to reload model: {}", e.what());
-        if (fileWatcher) {
-            fileWatcher->setLoadingState(
-                ModelFileWatcher::LoadingState::Error
-            );
-            fileWatcher->setLastError(e.what());
-        }
-    }
-
-    pendingReload = false;
-}
+// File watching is now handled by ModelManager
