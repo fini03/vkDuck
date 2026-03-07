@@ -59,6 +59,8 @@ PinLookupResult NodeGraph::findPin(ax::NodeEditor::PinId id) {
                 };
             if (model->cameraPin.id == id)
                 return {model, &model->cameraPin, NodePinKind::Output};
+            if (model->lightPin.id == id)
+                return {model, &model->lightPin, NodePinKind::Output};
         }
 
         // --- Handle all Camera types (Orbital, Fixed) ---
@@ -158,6 +160,7 @@ void NodeGraph::removeNode(ed::NodeId nodeId) {
         pinsToRemove.insert(model->texturePin.id);
         pinsToRemove.insert(model->vertexDataPin.id);
         pinsToRemove.insert(model->cameraPin.id);
+        pinsToRemove.insert(model->lightPin.id);
     } else if (auto* camera =
                    dynamic_cast<CameraNodeBase*>(nodeToRemove)) {
         pinsToRemove.insert(camera->cameraPin.id);

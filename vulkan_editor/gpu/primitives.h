@@ -51,6 +51,36 @@ struct alignas(16) LightData {
     glm::vec3 position{0.0f, 2.0f, 0.0f};
     float radius{5.0f};
     glm::vec3 color{1.0f, 1.0f, 1.0f};
+    float intensity{1.0f};
+};
+
+// Header for lights buffer - precedes the light array in GPU memory
+struct alignas(16) LightsHeader {
+    int32_t numLights{0};
+    int32_t _pad[3]{0, 0, 0};  // Pad to 16 bytes for alignment
+};
+
+// Dynamic lights container - header + vector, combined into buffer for GPU
+struct LightsBuffer {
+    LightsHeader header;
+    std::vector<LightData> lights;
+    std::vector<uint8_t> gpuBuffer;  // Combined buffer for upload
+
+    void updateGpuBuffer() {
+        size_t headerSize = sizeof(LightsHeader);
+        size_t lightsSize = sizeof(LightData) * lights.size();
+        gpuBuffer.resize(headerSize + lightsSize);
+
+        header.numLights = static_cast<int32_t>(lights.size());
+        std::memcpy(gpuBuffer.data(), &header, headerSize);
+        if (!lights.empty()) {
+            std::memcpy(gpuBuffer.data() + headerSize, lights.data(), lightsSize);
+        }
+    }
+
+    std::span<uint8_t> getSpan() {
+        return std::span<uint8_t>(gpuBuffer.data(), gpuBuffer.size());
+    }
 };
 
 struct StoreHandle {

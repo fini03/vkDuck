@@ -75,9 +75,10 @@ bool DefaultRendererSetup::createForModel(
     lightNode->numLights = 1;
     lightNode->ensureLightCount();
     // Position light above and to the side
-    lightNode->lights[0].position = glm::vec3(5.0f, 5.0f, 5.0f);
-    lightNode->lights[0].color = glm::vec3(1.0f, 1.0f, 1.0f);
-    lightNode->lights[0].radius = 20.0f;
+    lightNode->lightsBuffer.lights[0].position = glm::vec3(5.0f, 5.0f, 5.0f);
+    lightNode->lightsBuffer.lights[0].color = glm::vec3(1.0f, 1.0f, 1.0f);
+    lightNode->lightsBuffer.lights[0].radius = 20.0f;
+    lightNode->lightsBuffer.lights[0].intensity = 1.0f;
     LightNode* lightPtr = lightNode.get();
     graph.addNode(std::move(lightNode));
 

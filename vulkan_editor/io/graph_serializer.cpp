@@ -349,6 +349,7 @@ PipelineState::buildPinIdMap(NodeGraph& graph) const {
             pinIdMap[model->vertexDataPin.id.Get()] =
                 &model->vertexDataPin;
             pinIdMap[model->cameraPin.id.Get()] = &model->cameraPin;
+            pinIdMap[model->lightPin.id.Get()] = &model->lightPin;
         } else if (auto* present =
                        dynamic_cast<PresentNode*>(node.get())) {
             pinIdMap[present->imagePin.id.Get()] = &present->imagePin;

@@ -65,6 +65,27 @@ struct GLTFCamera {
 };
 // }}}
 
+// GLTFLight structure for embedded lights in GLTF files (KHR_lights_punctual) {{{
+enum class GLTFLightType {
+    Directional,
+    Point,
+    Spot
+};
+
+struct GLTFLight {
+    std::string name;
+    GLTFLightType type{GLTFLightType::Point};
+    glm::vec3 color{1.0f, 1.0f, 1.0f};
+    float intensity{1.0f};
+    float range{0.0f};          // 0 = infinite (for point/spot lights)
+    float innerConeAngle{0.0f}; // Spot light only (radians)
+    float outerConeAngle{0.785398f}; // Spot light only (radians, default ~45 degrees)
+    glm::vec3 position{0.0f, 0.0f, 0.0f};
+    glm::vec3 direction{0.0f, 0.0f, -1.0f}; // For directional/spot lights
+    glm::mat4 transform{1.0f};
+};
+// }}}
+
 // Model data structures {{{
 struct GeometryRange {
     uint32_t firstVertex;
@@ -79,6 +100,7 @@ struct ModelData {
     std::vector<uint32_t> indices;
     std::vector<GeometryRange> ranges;
     std::vector<GLTFCamera> cameras;        // Embedded cameras from GLTF
+    std::vector<GLTFLight> lights;          // Embedded lights from GLTF (KHR_lights_punctual)
     std::vector<std::string> texturePaths;  // Resolved texture paths per material
 };
 // }}}

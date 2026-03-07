@@ -143,6 +143,13 @@ nlohmann::json ModelNode::toJson() const {
          {"type", static_cast<int>(cameraPin.type)},
          {"label", cameraPin.label}}
     );
+    j["outputPins"].push_back(
+        {{"id", lightPin.id.Get()},
+         {"type", static_cast<int>(lightPin.type)},
+         {"label", lightPin.label}}
+    );
+
+    j["selectedLightIndex"] = selectedLightIndex;
 
     return j;
 }
@@ -162,11 +169,12 @@ void ModelNode::fromJson(const nlohmann::json& j) {
 
     // Note: Model loading is handled separately in pipeline_state.cpp
 
-    // Store camera selection to restore after model is loaded
+    // Store camera/light selection to restore after model is loaded
     selectedCameraIndex = j.value("selectedCameraIndex", -1);
+    selectedLightIndex = j.value("selectedLightIndex", -1);
 
     // Restore output pins by index (order: modelMatrix, texture,
-    // vertexData, cameras)
+    // vertexData, camera, light)
     if (j.contains("outputPins") && j["outputPins"].is_array()) {
         auto& pins = j["outputPins"];
         if (pins.size() > 0)
@@ -177,6 +185,8 @@ void ModelNode::fromJson(const nlohmann::json& j) {
             vertexDataPin.id = ed::PinId(pins[2]["id"].get<int>());
         if (pins.size() > 3)
             cameraPin.id = ed::PinId(pins[3]["id"].get<int>());
+        if (pins.size() > 4)
+            lightPin.id = ed::PinId(pins[4]["id"].get<int>());
     }
 }
 
@@ -199,6 +209,11 @@ void ModelNode::createDefaultPins() {
     cameraPin.id = ed::PinId(GetNextGlobalId());
     cameraPin.type = PinType::UniformBuffer;
     cameraPin.label = "Camera";
+
+    // Light output (selected GLTF light as UniformBuffer)
+    lightPin.id = ed::PinId(GetNextGlobalId());
+    lightPin.type = PinType::UniformBuffer;
+    lightPin.label = "Light";
 }
 
 void ModelNode::registerPins(PinRegistry& registry) {
@@ -235,6 +250,14 @@ void ModelNode::registerPins(PinRegistry& registry) {
         cameraPin.label
     );
 
+    lightPinHandle = registry.registerPinWithId(
+        id,
+        lightPin.id,
+        lightPin.type,
+        PinKind::Output,
+        lightPin.label
+    );
+
     usesRegistry = true;
 }
 
@@ -242,13 +265,15 @@ void ModelNode::render(
     ax::NodeEditor::Utilities::BlueprintNodeBuilder& builder,
     const NodeGraph& graph
 ) const {
-    // Calculate node width - only include camera pin if model has
-    // cameras
+    // Calculate node width - only include camera/light pins if model has them
     std::vector<std::string> pinLabels = {
         vertexDataPin.label, modelMatrixPin.label, texturePin.label
     };
     if (!gltfCameras.empty()) {
         pinLabels.push_back(cameraPin.label);
+    }
+    if (!gltfLights.empty()) {
+        pinLabels.push_back(lightPin.label);
     }
     float nodeWidth = CalculateNodeWidth(name, pinLabels);
 
@@ -327,6 +352,15 @@ void ModelNode::render(
         );
     }
 
+    // Only show light pin if model has GLTF lights
+    if (!gltfLights.empty()) {
+        DrawOutputPin(
+            lightPin.id, lightPin.label,
+            static_cast<int>(lightPin.type), graph.isPinLinked(lightPin.id),
+            nodeWidth, builder
+        );
+    }
+
     builder.End();
     ed::PopStyleColor();
 }
@@ -343,7 +377,9 @@ void ModelNode::loadModel(
     images.clear();
     modelData.clear();
     gltfCameras.clear();
+    gltfLights.clear();
     selectedCameraIndex = -1;
+    selectedLightIndex = -1;
     defaultTexture = {.path = projRoot / "data" / "images" / "default.png"};
 
     // Use vkDuck library's loadModel for all the heavy lifting
@@ -383,6 +419,17 @@ void ModelNode::loadModel(
         );
         selectedCameraIndex = 0; // Select first camera by default
         needsCameraApply = true; // Trigger auto-apply when camera UI is shown
+    }
+
+    // Copy lights from library
+    gltfLights = std::move(libModelData.lights);
+
+    if (!gltfLights.empty()) {
+        Log::info(
+            "Model", "Found {} light(s) in GLTF file",
+            gltfLights.size()
+        );
+        selectedLightIndex = 0; // Select first light by default
     }
 
     // Set up images and materials based on texture paths from library
@@ -495,6 +542,8 @@ void ModelNode::clearPrimitives() {
     modelMatrixArray = {};
     cameraUboArray = {};
     cameraUbo = nullptr;
+    lightUboArray = {};
+    lightUbo = nullptr;
 }
 
 void ModelNode::createPrimitives(primitives::Store& store) {
@@ -701,6 +750,33 @@ void ModelNode::createPrimitives(primitives::Store& store) {
             "Created camera UBO primitive for selected GLTF camera"
         );
     }
+
+    // Create light UBO if we have lights
+    if (!gltfLights.empty()) {
+        // Convert all GLTF lights to shader-compatible format
+        updateLightsFromGLTF();
+
+        // Create UniformBuffer primitive for lights
+        primitives::StoreHandle hLightUbo = store.newUniformBuffer();
+        lightUbo = &store.uniformBuffers[hLightUbo.handle];
+
+        // Point to our dynamic lights buffer (header + array)
+        lightUbo->dataType = primitives::UniformDataType::Light;
+        lightUbo->data = lightsBuffer.getSpan();
+
+        // Create array with single UBO containing all lights
+        lightUboArray = store.newArray();
+        auto& lgtArray = store.arrays[lightUboArray.handle];
+        lgtArray.type = primitives::Type::UniformBuffer;
+        lgtArray.handles = {hLightUbo.handle};
+
+        Log::debug(
+            "ModelNode",
+            "Created light UBO with {} GLTF lights ({} bytes)",
+            lightsBuffer.header.numLights,
+            lightUbo->data.size()
+        );
+    }
 }
 
 void ModelNode::getOutputPrimitives(
@@ -718,6 +794,9 @@ void ModelNode::getOutputPrimitives(
     }
     if (cameraUboArray.isValid()) {
         outputs.push_back({cameraPin.id, cameraUboArray});
+    }
+    if (lightUboArray.isValid()) {
+        outputs.push_back({lightPin.id, lightUboArray});
     }
 }
 
@@ -771,6 +850,40 @@ void ModelNode::updateCameraFromSelection() {
         "Updated camera from GLTF '{}' - Pos: ({:.2f}, {:.2f}, {:.2f})",
         gltfCam.name, position.x, position.y, position.z
     );
+}
+
+void ModelNode::updateLightsFromGLTF() {
+    // Resize to match GLTF lights (no limit)
+    lightsBuffer.lights.resize(gltfLights.size());
+
+    for (size_t i = 0; i < gltfLights.size(); ++i) {
+        const auto& gltfLight = gltfLights[i];
+        auto& light = lightsBuffer.lights[i];
+
+        // Convert GLTF light to shader-compatible format
+        light.position = gltfLight.position;
+
+        // Use range as radius, or default to 10.0 if infinite (range=0)
+        light.radius = gltfLight.range > 0.0f ? gltfLight.range : 10.0f;
+
+        // Pass color and intensity separately
+        light.color = gltfLight.color;
+        light.intensity = gltfLight.intensity;
+
+        Log::debug(
+            "ModelNode",
+            "Converted GLTF light '{}' - Pos: ({:.2f}, {:.2f}, {:.2f}), "
+            "Radius: {:.2f}, Color: ({:.2f}, {:.2f}, {:.2f}), Intensity: {:.2f}",
+            gltfLight.name,
+            light.position.x, light.position.y, light.position.z,
+            light.radius,
+            light.color.r, light.color.g, light.color.b,
+            light.intensity
+        );
+    }
+
+    // Build the combined GPU buffer (header + lights array)
+    lightsBuffer.updateGpuBuffer();
 }
 
 // ============================================================================
@@ -842,6 +955,7 @@ void ModelNode::reloadModel() {
         // Store current state that should persist across reload
         int savedCameraIndex = selectedCameraIndex;
         bool savedNeedsCameraApply = needsCameraApply;
+        int savedLightIndex = selectedLightIndex;
 
         // Reload the model
         loadModel(std::filesystem::path(currentModelPath), projectRoot);
@@ -851,6 +965,12 @@ void ModelNode::reloadModel() {
             savedCameraIndex < static_cast<int>(gltfCameras.size())) {
             selectedCameraIndex = savedCameraIndex;
             needsCameraApply = savedNeedsCameraApply;
+        }
+
+        // Restore light selection if it's still valid
+        if (savedLightIndex >= 0 &&
+            savedLightIndex < static_cast<int>(gltfLights.size())) {
+            selectedLightIndex = savedLightIndex;
         }
 
         if (fileWatcher) {

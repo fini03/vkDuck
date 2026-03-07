@@ -12,7 +12,7 @@ void LightEditorUI::Draw(LightNode* lightNode) {
     if (lightNode->shaderControlledCount) {
         ImGui::BeginDisabled();
         int count = lightNode->numLights;
-        ImGui::SliderInt("Number of Lights", &count, 1, 16);
+        ImGui::InputInt("Number of Lights", &count);
         ImGui::EndDisabled();
         ImGui::TextColored(
             ImVec4(0.7f, 0.7f, 0.3f, 1.0f),
@@ -20,9 +20,8 @@ void LightEditorUI::Draw(LightNode* lightNode) {
         );
     } else {
         int prevNumLights = lightNode->numLights;
-        ImGui::SliderInt(
-            "Number of Lights", &lightNode->numLights, 1, 16
-        );
+        ImGui::InputInt("Number of Lights", &lightNode->numLights);
+        if (lightNode->numLights < 1) lightNode->numLights = 1;
 
         if (prevNumLights != lightNode->numLights) {
             lightNode->ensureLightCount();
@@ -37,15 +36,15 @@ void LightEditorUI::Draw(LightNode* lightNode) {
                               2.0f * std::numbers::pi_v<float>;
                 float radius = 5.0f;
 
-                lightNode->lights[i].position = glm::vec3(
+                lightNode->lightsBuffer.lights[i].position = glm::vec3(
                     cos(angle) * radius, 2.0f, sin(angle) * radius
                 );
             }
         }
         ImGui::SameLine();
         if (ImGui::Button("Random Colors")) {
-            for (auto& light : lightNode->lights) {
-                light.color = glm::vec3(
+            for (int i = 0; i < lightNode->numLights; ++i) {
+                lightNode->lightsBuffer.lights[i].color = glm::vec3(
                     (float)rand() / RAND_MAX, (float)rand() / RAND_MAX,
                     (float)rand() / RAND_MAX
                 );
@@ -53,8 +52,8 @@ void LightEditorUI::Draw(LightNode* lightNode) {
         }
         ImGui::SameLine();
         if (ImGui::Button("White Light")) {
-            for (auto& light : lightNode->lights) {
-                light.color = glm::vec3(1.0f, 1.0f, 1.0f);
+            for (int i = 0; i < lightNode->numLights; ++i) {
+                lightNode->lightsBuffer.lights[i].color = glm::vec3(1.0f, 1.0f, 1.0f);
             }
         }
     }
@@ -63,7 +62,7 @@ void LightEditorUI::Draw(LightNode* lightNode) {
     ImGui::SeparatorText("Individual Lights");
 
     for (int i = 0; i < lightNode->numLights; ++i) {
-        auto& light = lightNode->lights[i];
+        auto& light = lightNode->lightsBuffer.lights[i];
 
         ImGui::PushID(i);
 
@@ -74,6 +73,7 @@ void LightEditorUI::Draw(LightNode* lightNode) {
             ImGui::DragFloat3("Position", &light.position.x, 0.1f);
             ImGui::ColorEdit3("Color", &light.color.x);
             ImGui::DragFloat("Radius", &light.radius, 0.1f, 0.1f, 0.0f, "%.2f");
+            ImGui::DragFloat("Intensity", &light.intensity, 0.1f, 0.0f, 100.0f, "%.2f");
 
             ImGui::Unindent();
         }

@@ -41,9 +41,9 @@ public:
 
     void ensureLightCount();
 
-    // Light array configuration
-    std::vector<LightData> lights;
-    int numLights{6};
+    // Light array configuration - dynamic size
+    primitives::LightsBuffer lightsBuffer;
+    int numLights{6};  // User-configurable count (no limit)
 
     // When connected to a pipeline, this is true and numLights is
     // read-only

@@ -3,6 +3,7 @@
 #include "../graph/node_graph.h"
 #include "../graph/default_renderer.h"
 #include "../shader/shader_manager.h"
+#include <glm/gtc/constants.hpp>
 #include <imgui.h>
 
 namespace fs = std::filesystem;
@@ -39,6 +40,11 @@ void ModelSettingsUI::Draw(ModelNode* modelNode, ShaderManager* shaderManager, N
             // This allows reconnecting when switching between models with/without cameras
             if (modelNode->gltfCameras.empty() && graph) {
                 graph->removeLinksForPin(modelNode->cameraPin.id);
+            }
+
+            // If the new model has no lights, remove any existing links to the light pin
+            if (modelNode->gltfLights.empty() && graph) {
+                graph->removeLinksForPin(modelNode->lightPin.id);
             }
         }
 
@@ -168,6 +174,81 @@ void ModelSettingsUI::Draw(ModelNode* modelNode, ShaderManager* shaderManager, N
                 ImGui::Text("X Mag: %.2f, Y Mag: %.2f", cam.xmag, cam.ymag);
             }
             ImGui::Text("Near: %.3f, Far: %.1f", cam.nearPlane, cam.farPlane);
+        }
+
+        ImGui::Spacing();
+    }
+
+    // GLTF Lights info (only show if model has lights)
+    if (!modelNode->gltfLights.empty()) {
+        ImGui::Separator();
+        ImGui::Text("GLTF Lights (%zu total)", modelNode->gltfLights.size());
+
+        // Build light names for combo box (for viewing details)
+        std::vector<const char*> lightNames;
+        for (const auto& light : modelNode->gltfLights) {
+            lightNames.push_back(light.name.c_str());
+        }
+
+        // selectedLightIndex is used to view individual light details
+        if (modelNode->selectedLightIndex < 0 && !lightNames.empty()) {
+            modelNode->selectedLightIndex = 0;
+        }
+        ImGui::Combo(
+            "Inspect Light", &modelNode->selectedLightIndex, lightNames.data(),
+            static_cast<int>(lightNames.size())
+        );
+
+        // Show inspected light info
+        if (modelNode->selectedLightIndex >= 0 &&
+            modelNode->selectedLightIndex < static_cast<int>(modelNode->gltfLights.size())) {
+            const auto& light =
+                modelNode->gltfLights[modelNode->selectedLightIndex];
+            ImGui::TextColored(
+                ImVec4(0.9f, 0.9f, 0.7f, 1.0f), "Light: %s",
+                light.name.c_str()
+            );
+
+            // Light type
+            const char* typeStr = "Unknown";
+            switch (light.type) {
+                case GLTFLightType::Directional: typeStr = "Directional"; break;
+                case GLTFLightType::Point: typeStr = "Point"; break;
+                case GLTFLightType::Spot: typeStr = "Spot"; break;
+            }
+            ImGui::Text("Type: %s", typeStr);
+
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "GLTF Values:");
+            ImGui::Text(
+                "Position: (%.2f, %.2f, %.2f)",
+                light.position.x, light.position.y, light.position.z
+            );
+            ImGui::Text(
+                "Direction: (%.2f, %.2f, %.2f)",
+                light.direction.x, light.direction.y, light.direction.z
+            );
+            ImGui::Text(
+                "Color: (%.2f, %.2f, %.2f)",
+                light.color.r, light.color.g, light.color.b
+            );
+            ImGui::Text("Intensity: %.2f", light.intensity);
+
+            if (light.type == GLTFLightType::Point || light.type == GLTFLightType::Spot) {
+                if (light.range > 0.0f) {
+                    ImGui::Text("Range: %.2f", light.range);
+                } else {
+                    ImGui::Text("Range: Infinite");
+                }
+            }
+
+            if (light.type == GLTFLightType::Spot) {
+                ImGui::Text(
+                    "Inner Cone: %.1f deg, Outer Cone: %.1f deg",
+                    glm::degrees(light.innerConeAngle),
+                    glm::degrees(light.outerConeAngle)
+                );
+            }
         }
 
         ImGui::Spacing();
