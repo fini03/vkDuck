@@ -399,4 +399,351 @@ PoolSizeContribution DescriptorSet::getPoolSizeContribution(
     return contrib;
 }
 
+// ============================================================================
+// DescriptorPool - Code Generation
+// ============================================================================
+
+using std::print;
+
+void DescriptorPool::generateCreate(const Store& store, std::ostream& out) const {
+    if (name.empty()) return;
+
+    const auto& poolSets = getSets();
+    if (poolSets.empty()) {
+        print(out, "// {} has no descriptor sets\n\n", name);
+        return;
+    }
+
+    uint32_t imageCount = 0;
+    uint32_t uniformBufferCount = 0;
+    uint32_t totalSets = 0;
+
+    for (const auto& hSet : poolSets) {
+        if (!hSet.isValid()) continue;
+        const auto& ds = store.descriptorSets[hSet.handle];
+        if (ds.name.empty()) continue;
+
+        auto contrib = ds.getPoolSizeContribution(store, 0);
+        totalSets += contrib.setCount;
+        imageCount += contrib.imageCount;
+        uniformBufferCount += contrib.uniformBufferCount;
+    }
+
+    if (totalSets == 0) {
+        print(out, "// {} has no valid descriptor sets\n\n", name);
+        return;
+    }
+
+    std::vector<std::string> poolSizeEntries;
+    if (imageCount > 0) {
+        poolSizeEntries.push_back(std::format(
+            "        {{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, {} }}",
+            imageCount));
+    }
+    if (uniformBufferCount > 0) {
+        poolSizeEntries.push_back(std::format(
+            "        {{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, {} }}",
+            uniformBufferCount));
+    }
+
+    if (poolSizeEntries.empty()) {
+        print(out, "// {} has no descriptors\n\n", name);
+        return;
+    }
+
+    std::string poolSizesStr;
+    for (size_t i = 0; i < poolSizeEntries.size(); ++i) {
+        poolSizesStr += poolSizeEntries[i];
+        if (i < poolSizeEntries.size() - 1) poolSizesStr += ",\n";
+    }
+
+    print(out,
+        "// Descriptor Pool: {}\n"
+        "{{\n"
+        "    std::array<VkDescriptorPoolSize, {}> poolSizes = {{{{\n"
+        "{}\n"
+        "    }}}};\n\n"
+        "    VkDescriptorPoolCreateInfo poolInfo{{\n"
+        "        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,\n"
+        "        .maxSets = {},\n"
+        "        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),\n"
+        "        .pPoolSizes = poolSizes.data()\n"
+        "    }};\n\n"
+        "    vkchk(vkCreateDescriptorPool(device, &poolInfo, nullptr, &{}));\n"
+        "}}\n\n",
+        name,
+        poolSizeEntries.size(),
+        poolSizesStr,
+        totalSets,
+        name
+    );
+}
+
+void DescriptorPool::generateDestroy(const Store& store, std::ostream& out) const {
+    if (name.empty() || getSets().empty()) return;
+
+    print(out,
+        "    // Destroy Descriptor Pool: {}\n"
+        "    if ({} != VK_NULL_HANDLE) {{\n"
+        "        vkDestroyDescriptorPool(device, {}, nullptr);\n"
+        "        {} = VK_NULL_HANDLE;\n"
+        "    }}\n\n",
+        name, name, name, name
+    );
+}
+
+// ============================================================================
+// DescriptorSet - Code Generation
+// ============================================================================
+
+void DescriptorSet::generateCreate(const Store& store, std::ostream& out) const {
+    if (name.empty()) return;
+
+    if (expectedBindings.empty()) {
+        print(out, "// Descriptor Set: {} (no bindings)\n\n", name);
+        return;
+    }
+
+    print(out, "// Descriptor Set: {}\n", name);
+    print(out, "{{\n");
+
+    print(out, "    std::vector<VkDescriptorSetLayoutBinding> {}_layoutBindings = {{{{\n", name);
+    for (size_t i = 0; i < expectedBindings.size(); ++i) {
+        const auto& binding = expectedBindings[i];
+        const char* typeStr = binding.type == Type::Image
+            ? "VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER"
+            : "VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER";
+
+        print(out, "        {{\n");
+        print(out, "            .binding = {},\n", binding.binding);
+        print(out, "            .descriptorType = {},\n", typeStr);
+        print(out, "            .descriptorCount = {},\n", binding.arrayCount);
+        print(out, "            .stageFlags = {}\n", string_VkShaderStageFlags(binding.stages));
+        print(out, "        }}");
+        if (i < expectedBindings.size() - 1) print(out, ",");
+        print(out, "\n");
+    }
+    print(out, "    }}}};\n\n");
+
+    print(out,
+        "    VkDescriptorSetLayoutCreateInfo {}_layoutInfo{{\n"
+        "        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,\n"
+        "        .bindingCount = static_cast<uint32_t>({}_layoutBindings.size()),\n"
+        "        .pBindings = {}_layoutBindings.data()\n"
+        "    }};\n\n"
+        "    vkchk(vkCreateDescriptorSetLayout(device, &{}_layoutInfo, nullptr, &{}_layout));\n\n",
+        name, name, name, name, name
+    );
+
+    std::string poolName = pool.isValid() ? store.descriptorPools[pool.handle].name : "descriptorPool";
+    uint32_t calculatedCardinality = cardinality(store);
+    uint32_t numSetsNeeded = calculatedCardinality > 0 ? calculatedCardinality : 1;
+
+    print(out,
+        "    uint32_t {}_numSets = {};\n"
+        "    std::vector<VkDescriptorSetLayout> {}_layouts({}_numSets, {}_layout);\n"
+        "    VkDescriptorSetAllocateInfo {}_allocInfo{{\n"
+        "        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,\n"
+        "        .descriptorPool = {},\n"
+        "        .descriptorSetCount = {}_numSets,\n"
+        "        .pSetLayouts = {}_layouts.data()\n"
+        "    }};\n"
+        "    {}_sets.resize({}_numSets);\n"
+        "    vkchk(vkAllocateDescriptorSets(device, &{}_allocInfo, {}_sets.data()));\n\n",
+        name, numSetsNeeded, name, name, name, name,
+        poolName, name, name, name, name, name, name
+    );
+
+    for (size_t idx = 0; idx < expectedBindings.size(); ++idx) {
+        const auto& binding = expectedBindings[idx];
+
+        std::string resourceName;
+        std::string resourceSize;
+        std::vector<std::string> imageViewNames;
+        bool hasBinding = idx < bindings.size() && bindings[idx].isValid();
+
+        if (hasBinding) {
+            const Array& array = store.arrays[bindings[idx].handle];
+            if (!array.handles.empty()) {
+                if (array.type == Type::Image) {
+                    for (uint32_t handle : array.handles) {
+                        const Image& img = store.images[handle];
+                        imageViewNames.push_back(img.name + "_view");
+                    }
+                    resourceName = imageViewNames[0];
+                } else if (array.type == Type::UniformBuffer) {
+                    uint32_t resourceHandle = array.handles[0];
+                    const UniformBuffer& ubo = store.uniformBuffers[resourceHandle];
+                    resourceName = ubo.name;
+                    resourceSize = std::to_string(ubo.data.size());
+                } else if (array.type == Type::Camera) {
+                    uint32_t resourceHandle = array.handles[0];
+                    const Camera& cam = store.cameras[resourceHandle];
+                    const UniformBuffer& ubo = store.uniformBuffers[cam.ubo.handle];
+                    resourceName = ubo.name;
+                    resourceSize = std::to_string(ubo.data.size());
+                }
+            }
+        }
+
+        if (binding.type == Type::Image) {
+            print(out,
+                "    // Sampler for binding {}\n"
+                "    VkSamplerCreateInfo {}_samplerInfo_{}{{\n"
+                "        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,\n"
+                "        .magFilter = {},\n"
+                "        .minFilter = {},\n"
+                "        .mipmapMode = {},\n"
+                "        .addressModeU = {},\n"
+                "        .addressModeV = {},\n"
+                "        .addressModeW = {},\n"
+                "        .borderColor = {}\n"
+                "    }};\n"
+                "    vkchk(vkCreateSampler(device, &{}_samplerInfo_{}, nullptr, &{}_sampler_{}));\n\n",
+                binding.binding, name, binding.binding,
+                string_VkFilter(binding.samplerInfo.magFilter),
+                string_VkFilter(binding.samplerInfo.minFilter),
+                string_VkSamplerMipmapMode(binding.samplerInfo.mipmapMode),
+                string_VkSamplerAddressMode(binding.samplerInfo.addressModeU),
+                string_VkSamplerAddressMode(binding.samplerInfo.addressModeV),
+                string_VkSamplerAddressMode(binding.samplerInfo.addressModeW),
+                string_VkBorderColor(binding.samplerInfo.borderColor),
+                name, binding.binding, name, binding.binding
+            );
+
+            if (imageViewNames.size() > 1) {
+                print(out,
+                    "    // Array of image views for per-object textures (binding {})\n"
+                    "    std::array<VkImageView, {}> {}_imageViews_{} = {{{{\n",
+                    binding.binding, imageViewNames.size(), name, binding.binding
+                );
+                for (size_t i = 0; i < imageViewNames.size(); ++i) {
+                    print(out, "        {}", imageViewNames[i]);
+                    if (i < imageViewNames.size() - 1) print(out, ",");
+                    print(out, "\n");
+                }
+                print(out, "    }}}};\n\n");
+
+                print(out,
+                    "    // Write image descriptor for binding {} (per-object textures)\n"
+                    "    for (uint32_t i = 0; i < {}_numSets; ++i) {{\n"
+                    "        VkDescriptorImageInfo {}_imageInfo_{}{{\n"
+                    "            .sampler = {}_sampler_{},\n"
+                    "            .imageView = {}_imageViews_{}[i],\n"
+                    "            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL\n"
+                    "        }};\n"
+                    "        VkWriteDescriptorSet {}_write_{}{{\n"
+                    "            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,\n"
+                    "            .dstSet = {}_sets[i],\n"
+                    "            .dstBinding = {},\n"
+                    "            .dstArrayElement = 0,\n"
+                    "            .descriptorCount = 1,\n"
+                    "            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,\n"
+                    "            .pImageInfo = &{}_imageInfo_{}\n"
+                    "        }};\n"
+                    "        vkUpdateDescriptorSets(device, 1, &{}_write_{}, 0, nullptr);\n"
+                    "    }}\n\n",
+                    binding.binding, name, name, binding.binding,
+                    name, binding.binding, name, binding.binding,
+                    name, binding.binding, name, binding.binding,
+                    name, binding.binding, name, binding.binding
+                );
+            } else {
+                std::string imageViewExpr = resourceName.empty()
+                    ? std::format("VK_NULL_HANDLE /* TODO: set {}_binding{}_imageView */", name, binding.binding)
+                    : resourceName;
+
+                print(out,
+                    "    // Write image descriptor for binding {}\n"
+                    "    for (uint32_t i = 0; i < {}_numSets; ++i) {{\n"
+                    "        VkDescriptorImageInfo {}_imageInfo_{}{{\n"
+                    "            .sampler = {}_sampler_{},\n"
+                    "            .imageView = {},\n"
+                    "            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL\n"
+                    "        }};\n"
+                    "        VkWriteDescriptorSet {}_write_{}{{\n"
+                    "            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,\n"
+                    "            .dstSet = {}_sets[i],\n"
+                    "            .dstBinding = {},\n"
+                    "            .dstArrayElement = 0,\n"
+                    "            .descriptorCount = 1,\n"
+                    "            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,\n"
+                    "            .pImageInfo = &{}_imageInfo_{}\n"
+                    "        }};\n"
+                    "        vkUpdateDescriptorSets(device, 1, &{}_write_{}, 0, nullptr);\n"
+                    "    }}\n\n",
+                    binding.binding, name, name, binding.binding,
+                    name, binding.binding, imageViewExpr,
+                    name, binding.binding, name, binding.binding,
+                    name, binding.binding, name, binding.binding
+                );
+            }
+        } else if (binding.type == Type::UniformBuffer) {
+            std::string bufferExpr = resourceName.empty()
+                ? std::format("VK_NULL_HANDLE /* TODO: set {}_binding{}_buffer */", name, binding.binding)
+                : resourceName;
+            std::string rangeExpr = resourceSize.empty()
+                ? std::format("VK_WHOLE_SIZE /* TODO: set {}_binding{}_bufferSize */", name, binding.binding)
+                : resourceSize;
+
+            print(out,
+                "    // Write uniform buffer descriptor for binding {}\n"
+                "    for (uint32_t i = 0; i < {}_numSets; ++i) {{\n"
+                "        VkDescriptorBufferInfo {}_bufferInfo_{}{{\n"
+                "            .buffer = {},\n"
+                "            .offset = 0,\n"
+                "            .range = {}\n"
+                "        }};\n"
+                "        VkWriteDescriptorSet {}_write_{}{{\n"
+                "            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,\n"
+                "            .dstSet = {}_sets[i],\n"
+                "            .dstBinding = {},\n"
+                "            .dstArrayElement = 0,\n"
+                "            .descriptorCount = 1,\n"
+                "            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,\n"
+                "            .pBufferInfo = &{}_bufferInfo_{}\n"
+                "        }};\n"
+                "        vkUpdateDescriptorSets(device, 1, &{}_write_{}, 0, nullptr);\n"
+                "    }}\n\n",
+                binding.binding, name, name, binding.binding,
+                bufferExpr, rangeExpr, name, binding.binding,
+                name, binding.binding, name, binding.binding,
+                name, binding.binding
+            );
+        }
+    }
+
+    print(out, "}}\n\n");
+}
+
+void DescriptorSet::generateDestroy(const Store& store, std::ostream& out) const {
+    if (name.empty() || expectedBindings.empty()) return;
+
+    print(out, "    // Destroy DescriptorSet: {}\n", name);
+
+    for (const auto& binding : expectedBindings) {
+        if (binding.type == Type::Image) {
+            print(out,
+                "   if ({}_sampler_{} != VK_NULL_HANDLE) {{\n"
+                "       vkDestroySampler(device, {}_sampler_{}, nullptr);\n"
+                "       {}_sampler_{} = VK_NULL_HANDLE;\n"
+                "   }}\n",
+                name, binding.binding,
+                name, binding.binding,
+                name, binding.binding
+            );
+        }
+    }
+
+    print(out, "    {}_sets.clear();\n", name);
+
+    print(out,
+        "   if ({}_layout != VK_NULL_HANDLE) {{\n"
+        "       vkDestroyDescriptorSetLayout(device, {}_layout, nullptr);\n"
+        "       {}_layout = VK_NULL_HANDLE;\n"
+        "   }}\n\n",
+        name, name, name
+    );
+}
+
 } // namespace primitives

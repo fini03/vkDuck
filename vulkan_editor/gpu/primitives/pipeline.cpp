@@ -859,4 +859,726 @@ VkDescriptorSet Present::getLiveViewImage() const {
     return outDS;
 }
 
+// ============================================================================
+// Shader - Code Generation
+// ============================================================================
+
+using std::print;
+
+void Shader::generateCreate(const Store& store, std::ostream& out) const {
+    assert(!name.empty());
+
+    auto shaderPath = std::filesystem::path{"compiled_shaders"} / getSpirvPath();
+    print(out,
+        "// Shader: {0} (stage={1}, entryPoint={2})\n"
+        "{{\n"
+        "    auto {0}_path = std::filesystem::path{{\"{3}\"}}.string();\n"
+        "    auto {0}_code = readFile({0}_path.c_str());\n"
+        "    {0} = createShaderModule(device, {0}_code);\n"
+        "}}\n\n",
+        name,
+        string_VkShaderStageFlagBits(stage),
+        entryPoint,
+        shaderPath.generic_string());
+}
+
+void Shader::generateDestroy(const Store& store, std::ostream& out) const {
+    if (name.empty()) return;
+
+    print(out,
+        "   // Destroy Shader: {0}\n"
+        "   if ({0} != VK_NULL_HANDLE) {{\n"
+        "       vkDestroyShaderModule(device, {0}, nullptr);\n"
+        "       {0} = VK_NULL_HANDLE;\n"
+        "   }}\n\n",
+        name
+    );
+}
+
+// ============================================================================
+// Pipeline - Code Generation
+// ============================================================================
+
+void Pipeline::generateCreate(const Store& store, std::ostream& out) const {
+    assert(!name.empty());
+    assert(renderPass.isValid());
+    const auto& rp{store.renderPasses[renderPass.handle]};
+
+    print(out, "// Pipeline: {}\n", name);
+    print(out, "{{\n");
+
+    // Shader stages
+    print(out, "    // Shader stages\n");
+    print(out, "    std::array {}_shaderStages{{\n", name);
+    for (const auto& shHandle : shaders) {
+        assert(shHandle.isValid());
+        const auto& shader = store.shaders[shHandle.handle];
+        assert(!shader.name.empty());
+
+        print(out, "        VkPipelineShaderStageCreateInfo{{\n");
+        print(out, "            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,\n");
+        print(out, "            .stage = {},\n", string_VkShaderStageFlagBits(shader.stage));
+        print(out, "            .module = {},\n", shader.name);
+        print(out, "            .pName = \"{}\"\n", shader.entryPoint.empty() ? "main": shader.entryPoint);
+        print(out, "        }},\n");
+    }
+    print(out, "    }};\n\n");
+
+    // Vertex input state
+    print(out, "    // Vertex input state\n");
+    if (vertexDataHandle.isValid()) {
+        std::string vdName = "vertexData";
+        if (vertexDataHandle.type == Type::Array) {
+            const auto& arr = store.arrays[vertexDataHandle.handle];
+            if (!arr.handles.empty() && arr.type == Type::VertexData) {
+                const auto& vd = store.vertexDatas[arr.handles[0]];
+                if (!vd.name.empty()) vdName = vd.name;
+
+                print(out, "    VkVertexInputBindingDescription {}_bindingDesc{{\n", name);
+                print(out, "        .binding = {},\n", vd.bindingDescription.binding);
+                print(out, "        .stride = {},\n", vd.bindingDescription.stride);
+                print(out, "        .inputRate = {}\n", string_VkVertexInputRate(vd.bindingDescription.inputRate));
+                print(out, "    }};\n\n");
+
+                print(out, "    std::vector<VkVertexInputAttributeDescription> {}_attribDescs = {{{{\n", name);
+                for (size_t j = 0; j < vd.attributeDescriptions.size(); ++j) {
+                    const auto& attr = vd.attributeDescriptions[j];
+                    print(out, "        {{\n");
+                    print(out, "            .location = {},\n", attr.location);
+                    print(out, "            .binding = {},\n", attr.binding);
+                    print(out, "            .format = {},\n", string_VkFormat(attr.format));
+                    print(out, "            .offset = {}\n", attr.offset);
+                    print(out, "        }}");
+                    if (j < vd.attributeDescriptions.size() - 1) print(out, ",");
+                    print(out, "\n");
+                }
+                print(out, "    }}}};\n\n");
+            }
+        }
+
+        print(out, "    VkPipelineVertexInputStateCreateInfo {}_vertexInputInfo{{\n", name);
+        print(out, "        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,\n");
+        print(out, "        .vertexBindingDescriptionCount = 1,\n");
+        print(out, "        .pVertexBindingDescriptions = &{}_bindingDesc,\n", name);
+        print(out, "        .vertexAttributeDescriptionCount = static_cast<uint32_t>({}_attribDescs.size()),\n", name);
+        print(out, "        .pVertexAttributeDescriptions = {}_attribDescs.data()\n", name);
+        print(out, "    }};\n\n");
+    } else {
+        print(out, "    VkPipelineVertexInputStateCreateInfo {}_vertexInputInfo{{\n", name);
+        print(out, "        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,\n");
+        print(out, "        .vertexBindingDescriptionCount = 0,\n");
+        print(out, "        .pVertexBindingDescriptions = nullptr,\n");
+        print(out, "        .vertexAttributeDescriptionCount = 0,\n");
+        print(out, "        .pVertexAttributeDescriptions = nullptr\n");
+        print(out, "    }};\n\n");
+    }
+
+    // Input assembly state
+    print(out,
+        "    // Input assembly state\n"
+        "    VkPipelineInputAssemblyStateCreateInfo {}_inputAssembly{{\n"
+        "        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,\n"
+        "        .topology = {},\n"
+        "        .primitiveRestartEnable = {}\n"
+        "    }};\n\n",
+        name,
+        string_VkPrimitiveTopology(inputAssembly.topology),
+        inputAssembly.primitiveRestartEnable ? "VK_TRUE" : "VK_FALSE"
+    );
+
+    // Viewport state (dynamic)
+    print(out,
+        "    // Viewport state (dynamic)\n"
+        "    VkPipelineViewportStateCreateInfo {}_viewportState{{\n"
+        "        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,\n"
+        "        .viewportCount = 1,\n"
+        "        .pViewports = nullptr,\n"
+        "        .scissorCount = 1,\n"
+        "        .pScissors = nullptr\n"
+        "    }};\n\n",
+        name
+    );
+
+    // Rasterization state
+    print(out,
+        "    // Rasterization state\n"
+        "    VkPipelineRasterizationStateCreateInfo {}_rasterizer{{\n"
+        "        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,\n"
+        "        .depthClampEnable = {},\n"
+        "        .rasterizerDiscardEnable = {},\n"
+        "        .polygonMode = {},\n"
+        "        .cullMode = {},\n"
+        "        .frontFace = {},\n"
+        "        .depthBiasEnable = {},\n"
+        "        .depthBiasConstantFactor = {},\n"
+        "        .depthBiasClamp = {},\n"
+        "        .depthBiasSlopeFactor = {},\n"
+        "        .lineWidth = {}\n"
+        "    }};\n\n",
+        name,
+        rasterizer.depthClampEnable ? "VK_TRUE" : "VK_FALSE",
+        rasterizer.rasterizerDiscardEnable ? "VK_TRUE" : "VK_FALSE",
+        string_VkPolygonMode(rasterizer.polygonMode),
+        string_VkCullModeFlags(rasterizer.cullMode),
+        string_VkFrontFace(rasterizer.frontFace),
+        rasterizer.depthBiasEnable ? "VK_TRUE" : "VK_FALSE",
+        rasterizer.depthBiasConstantFactor,
+        rasterizer.depthBiasClamp,
+        rasterizer.depthBiasSlopeFactor,
+        rasterizer.lineWidth
+    );
+
+    // Multisample state
+    print(out,
+        "    // Multisample state\n"
+        "    VkPipelineMultisampleStateCreateInfo {}_multisampling{{\n"
+        "        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,\n"
+        "        .rasterizationSamples = {},\n"
+        "        .sampleShadingEnable = {},\n"
+        "        .minSampleShading = {}\n"
+        "    }};\n\n",
+        name,
+        string_VkSampleCountFlagBits(multisampling.rasterizationSamples),
+        multisampling.sampleShadingEnable ? "VK_TRUE" : "VK_FALSE",
+        multisampling.minSampleShading
+    );
+
+    // Color blend attachments - count and check for depth
+    bool hasDepth{false};
+    size_t colorAttachmentCount{0};
+    for (StoreHandle hAttachment : rp.attachments) {
+        assert(hAttachment.isValid());
+        const Attachment& a = store.attachments[hAttachment.handle];
+        assert(a.image.isValid());
+        const Image& backingImage = store.images[a.image.handle];
+        VkImageUsageFlags usage = backingImage.imageInfo.usage;
+
+        if (usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
+            hasDepth = true;
+        if (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
+            colorAttachmentCount++;
+    }
+
+    // Generate color blend attachments array
+    if (colorAttachmentCount > 0) {
+        print(out, "    // Color blend attachments\n    std::array {}_colorBlendAttachments = {{\n", name);
+        for (StoreHandle hAttachment : rp.attachments) {
+            const Attachment& a = store.attachments[hAttachment.handle];
+            const Image& backingImage = store.images[a.image.handle];
+            VkImageUsageFlags usage = backingImage.imageInfo.usage;
+            if (!(usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)) continue;
+
+            print(out,
+                "        VkPipelineColorBlendAttachmentState{{\n"
+                "            .blendEnable = {},\n"
+                "            .srcColorBlendFactor = {},\n"
+                "            .dstColorBlendFactor = {},\n"
+                "            .colorBlendOp = {},\n"
+                "            .srcAlphaBlendFactor = {},\n"
+                "            .dstAlphaBlendFactor = {},\n"
+                "            .alphaBlendOp = {},\n"
+                "            .colorWriteMask = {}\n"
+                "        }},\n",
+                a.colorBlending.blendEnable ? "VK_TRUE" : "VK_FALSE",
+                string_VkBlendFactor(a.colorBlending.srcColorBlendFactor),
+                string_VkBlendFactor(a.colorBlending.dstColorBlendFactor),
+                string_VkBlendOp(a.colorBlending.colorBlendOp),
+                string_VkBlendFactor(a.colorBlending.srcAlphaBlendFactor),
+                string_VkBlendFactor(a.colorBlending.dstAlphaBlendFactor),
+                string_VkBlendOp(a.colorBlending.alphaBlendOp),
+                string_VkColorComponentFlags(a.colorBlending.colorWriteMask));
+        }
+        print(out, "    }};\n\n");
+    }
+
+    // Color blend state
+    if (colorAttachmentCount > 0) {
+        print(out,
+            "    // Color blend state\n"
+            "    VkPipelineColorBlendStateCreateInfo {0}_colorBlending{{\n"
+            "        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,\n"
+            "        .logicOpEnable = {1},\n"
+            "        .logicOp = {2},\n"
+            "        .attachmentCount = {0}_colorBlendAttachments.size(),\n"
+            "        .pAttachments = {0}_colorBlendAttachments.data(),\n"
+            "        .blendConstants = {{ {3}, {4}, {5}, {6} }}\n"
+            "    }};\n\n",
+            name,
+            colorBlending.logicOpEnable ? "VK_TRUE" : "VK_FALSE",
+            string_VkLogicOp(colorBlending.logicOp),
+            colorBlending.blendConstants[0], colorBlending.blendConstants[1],
+            colorBlending.blendConstants[2], colorBlending.blendConstants[3]
+        );
+    } else {
+        print(out,
+            "    // Color blend state (no color attachments)\n"
+            "    VkPipelineColorBlendStateCreateInfo {0}_colorBlending{{\n"
+            "        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,\n"
+            "        .logicOpEnable = {1},\n"
+            "        .logicOp = {2},\n"
+            "        .attachmentCount = 0,\n"
+            "        .pAttachments = nullptr,\n"
+            "        .blendConstants = {{ {3}, {4}, {5}, {6} }}\n"
+            "    }};\n\n",
+            name,
+            colorBlending.logicOpEnable ? "VK_TRUE" : "VK_FALSE",
+            string_VkLogicOp(colorBlending.logicOp),
+            colorBlending.blendConstants[0], colorBlending.blendConstants[1],
+            colorBlending.blendConstants[2], colorBlending.blendConstants[3]
+        );
+    }
+
+    // Depth/stencil state
+    if (hasDepth) {
+        print(out,
+            "    // Depth/stencil state\n"
+            "    VkPipelineDepthStencilStateCreateInfo {}_depthStencil{{\n"
+            "        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,\n"
+            "        .depthTestEnable = {},\n"
+            "        .depthWriteEnable = {},\n"
+            "        .depthCompareOp = {},\n"
+            "        .depthBoundsTestEnable = {},\n"
+            "        .stencilTestEnable = {}\n"
+            "    }};\n\n",
+            name,
+            depthStencil.depthTestEnable ? "VK_TRUE" : "VK_FALSE",
+            depthStencil.depthWriteEnable ? "VK_TRUE" : "VK_FALSE",
+            string_VkCompareOp(depthStencil.depthCompareOp),
+            depthStencil.depthBoundsTestEnable ? "VK_TRUE" : "VK_FALSE",
+            depthStencil.stencilTestEnable ? "VK_TRUE" : "VK_FALSE"
+        );
+    }
+
+    // Dynamic state
+    print(out,
+        "    // Dynamic state\n"
+        "    std::array {0}_dynamicStates = {{\n"
+        "        VK_DYNAMIC_STATE_VIEWPORT,\n"
+        "        VK_DYNAMIC_STATE_SCISSOR\n"
+        "    }};\n"
+        "    VkPipelineDynamicStateCreateInfo {0}_dynamicState{{\n"
+        "        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,\n"
+        "        .dynamicStateCount = {0}_dynamicStates.size(),\n"
+        "        .pDynamicStates = {0}_dynamicStates.data()\n"
+        "    }};\n\n",
+        name
+    );
+
+    // Descriptor set layouts
+    if (!descriptorSetHandles.empty()) {
+        print(out, "    // Descriptor set layouts\n");
+        print(out, "    std::vector<VkDescriptorSetLayout> {}_dsLayouts = {{\n", name);
+        for (size_t i = 0; i < descriptorSetHandles.size(); ++i) {
+            const auto& dsHandle = descriptorSetHandles[i];
+            std::string dsName = store.getName(dsHandle);
+            if (dsName.empty()) dsName = std::format("descriptorSet_{}", dsHandle.handle);
+            print(out, "        {}_layout", dsName);
+            if (i < descriptorSetHandles.size() - 1) print(out, ",");
+            print(out, "\n");
+        }
+        print(out, "    }};\n\n");
+    }
+
+    // Pipeline layout
+    print(out,
+        "    // Pipeline layout\n"
+        "    VkPipelineLayoutCreateInfo {0}_layoutInfo{{\n"
+        "        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,\n"
+        "        .setLayoutCount = static_cast<uint32_t>({1}),\n"
+        "        .pSetLayouts = {2},\n"
+        "        .pushConstantRangeCount = 0,\n"
+        "        .pPushConstantRanges = nullptr\n"
+        "    }};\n"
+        "    vkchk(vkCreatePipelineLayout(device, &{0}_layoutInfo, nullptr, &{0}_layout));\n\n",
+        name,
+        descriptorSetHandles.empty() ? "0" : name + "_dsLayouts.size()",
+        descriptorSetHandles.empty() ? "nullptr" : name + "_dsLayouts.data()"
+    );
+
+    // Graphics pipeline
+    print(out,
+        "    // Graphics pipeline\n"
+        "    VkGraphicsPipelineCreateInfo {0}_pipelineInfo{{\n"
+        "        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,\n"
+        "        .stageCount = {0}_shaderStages.size(),\n"
+        "        .pStages = {0}_shaderStages.data(),\n"
+        "        .pVertexInputState = &{0}_vertexInputInfo,\n"
+        "        .pInputAssemblyState = &{0}_inputAssembly,\n"
+        "        .pViewportState = &{0}_viewportState,\n"
+        "        .pRasterizationState = &{0}_rasterizer,\n"
+        "        .pMultisampleState = &{0}_multisampling,\n"
+        "        .pDepthStencilState = {1},\n"
+        "        .pColorBlendState = &{0}_colorBlending,\n"
+        "        .pDynamicState = &{0}_dynamicState,\n"
+        "        .layout = {0}_layout,\n"
+        "        .renderPass = {2},\n"
+        "        .subpass = 0\n"
+        "    }};\n"
+        "    vkchk(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &{0}_pipelineInfo, nullptr, &{0}));\n",
+        name,
+        hasDepth ? std::format("&{}_depthStencil", name) : "nullptr",
+        rp.name
+    );
+
+    print(out, "}}\n\n");
+}
+
+void Pipeline::generateDestroy(const Store& store, std::ostream& out) const {
+    if (name.empty()) return;
+
+    print(out,
+        "   // Destroy Pipeline: {0}\n"
+        "   if ({0} != VK_NULL_HANDLE) {{\n"
+        "       vkDestroyPipeline(device, {0}, nullptr);\n"
+        "       {0} = VK_NULL_HANDLE;\n"
+        "   }}\n"
+        "   if ({0}_layout != VK_NULL_HANDLE) {{\n"
+        "       vkDestroyPipelineLayout(device, {0}_layout, nullptr);\n"
+        "       {0}_layout = VK_NULL_HANDLE;\n"
+        "   }}\n\n",
+        name
+    );
+}
+
+void Pipeline::generateRecordCommands(const Store& store, std::ostream& out) const {
+    assert(!name.empty());
+    assert(renderPass.isValid());
+    const auto& rp{store.renderPasses[renderPass.handle]};
+
+    print(out, "    // Pipeline: {}\n", name);
+    print(out, "    {{\n");
+
+    // Begin render pass
+    print(out,
+        "        VkRenderPassBeginInfo {0}_passInfo{{\n"
+        "            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,\n"
+        "            .renderPass = {1},\n"
+        "            .framebuffer = {2},\n"
+        "            .renderArea = {1}_renderArea,\n"
+        "            .clearValueCount = static_cast<uint32_t>({1}_clearValues.size()),\n"
+        "            .pClearValues = {1}_clearValues.data()\n"
+        "        }};\n\n"
+        "        vkCmdBeginRenderPass(cmdBuffer, &{0}_passInfo, VK_SUBPASS_CONTENTS_INLINE);\n\n",
+        name, rp.name,
+        rp.rendersToSwapchain(store) ? rp.name + "_framebuffers[imageInFlightIndex]" : rp.name + "_framebuffer"
+    );
+
+    // Set viewport (dynamic)
+    print(out,
+        "        VkViewport {0}_viewport{{\n"
+        "            .x = 0.0f,\n"
+        "            .y = 0.0f,\n"
+        "            .width = static_cast<float>({1}_renderArea.extent.width),\n"
+        "            .height = static_cast<float>({1}_renderArea.extent.height),\n"
+        "            .minDepth = 0.0f,\n"
+        "            .maxDepth = 1.0f\n"
+        "        }};\n"
+        "        vkCmdSetViewport(cmdBuffer, 0, 1, &{0}_viewport);\n\n",
+        name, rp.name
+    );
+
+    // Set scissor (dynamic)
+    print(out,
+        "        VkRect2D {0}_scissor{{\n"
+        "            .offset = {{0, 0}},\n"
+        "            .extent = {1}_renderArea.extent\n"
+        "        }};\n"
+        "        vkCmdSetScissor(cmdBuffer, 0, 1, &{0}_scissor);\n\n",
+        name, rp.name
+    );
+
+    // Bind pipeline
+    print(out, "        vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, {});\n\n", name);
+
+    // Find per-object descriptor set
+    int perObjectDescSetIndex = -1;
+    std::string perObjectDescSetName;
+    for (size_t i = 0; i < descriptorSetHandles.size(); ++i) {
+        if (!descriptorSetHandles[i].isValid()) continue;
+        const auto& ds = store.descriptorSets[descriptorSetHandles[i].handle];
+        const auto& dsBindings = ds.getBindings();
+        for (size_t bindIdx = 0; bindIdx < dsBindings.size(); ++bindIdx) {
+            if (!dsBindings[bindIdx].isValid()) continue;
+            const Array& arr = store.arrays[dsBindings[bindIdx].handle];
+            if (arr.type == Type::Image && arr.handles.size() > 1) {
+                perObjectDescSetIndex = static_cast<int>(i);
+                perObjectDescSetName = ds.name;
+                break;
+            }
+        }
+        if (perObjectDescSetIndex >= 0) break;
+    }
+
+    // Bind descriptor sets
+    if (!descriptorSetHandles.empty()) {
+        print(out, "        std::array {}_descSets{{\n", name);
+        for (const auto& dsHandle : descriptorSetHandles) {
+            if (dsHandle.isValid()) {
+                const auto& ds = store.descriptorSets[dsHandle.handle];
+                print(out, "            {}_sets[imageInFlightIndex % {}_sets.size()],\n", ds.name, ds.name);
+            }
+        }
+        print(out, "        }};\n");
+        print(out,
+            "        vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,\n"
+            "            {0}_layout, 0, static_cast<uint32_t>({0}_descSets.size()),\n"
+            "            {0}_descSets.data(), 0, nullptr);\n\n",
+            name
+        );
+    }
+
+    // Draw
+    if (vertexDataHandle.isValid()) {
+        if (vertexDataHandle.type == Type::Array) {
+            const auto& arr = store.arrays[vertexDataHandle.handle];
+            if (!arr.handles.empty() && arr.type == Type::VertexData) {
+                uint32_t geometryIndex = 0;
+                for (uint32_t handle : arr.handles) {
+                    const auto& vd = store.vertexDatas[handle];
+                    if (vd.name.empty()) continue;
+
+                    print(out, "        // Draw: {0}\n        {{\n", vd.name);
+
+                    if (perObjectDescSetIndex >= 0) {
+                        print(out,
+                            "            // Rebind per-object descriptor set\n"
+                            "            VkDescriptorSet {0}_perObjDescSet = {1}_sets[{2}];\n"
+                            "            vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,\n"
+                            "                {0}_layout, {3}, 1, &{0}_perObjDescSet, 0, nullptr);\n",
+                            name, perObjectDescSetName, geometryIndex, perObjectDescSetIndex
+                        );
+                    }
+
+                    print(out,
+                        "            VkBuffer vertexBuffers[] = {{{0}_vertexBuffer}};\n"
+                        "            VkDeviceSize offsets[] = {{0}};\n"
+                        "            vkCmdBindVertexBuffers(cmdBuffer, 0, 1, vertexBuffers, offsets);\n",
+                        vd.name
+                    );
+
+                    if (vd.indexCount > 0) {
+                        print(out,
+                            "            vkCmdBindIndexBuffer(cmdBuffer, {0}_indexBuffer, 0, VK_INDEX_TYPE_UINT32);\n"
+                            "            vkCmdDrawIndexed(cmdBuffer, {0}_indexCount, 1, 0, 0, 0);\n",
+                            vd.name
+                        );
+                    } else {
+                        print(out, "            vkCmdDraw(cmdBuffer, {}_vertexCount, 1, 0, 0);\n", vd.name);
+                    }
+                    print(out, "        }}\n");
+                    geometryIndex++;
+                }
+            }
+        }
+    } else {
+        print(out, "        // Fullscreen triangle (no vertex buffer)\n");
+        print(out, "        vkCmdDraw(cmdBuffer, 3, 1, 0, 0);\n");
+    }
+
+    print(out, "\n        vkCmdEndRenderPass(cmdBuffer);\n");
+    print(out, "    }}\n");
+}
+
+// ============================================================================
+// RenderPass - Code Generation
+// ============================================================================
+
+void RenderPass::generateCreate(const Store& store, std::ostream& out) const {
+    assert(!name.empty());
+    assert(!attachments.empty());
+
+    std::vector<const Attachment *> attachmentPtrs;
+    std::vector<const Image *> imagePtrs;
+    attachmentPtrs.reserve(attachments.size());
+    imagePtrs.reserve(attachments.size());
+    for (const auto& attHandle : attachments) {
+        assert(attHandle.isValid());
+        auto att = &store.attachments[attHandle.handle];
+        attachmentPtrs.push_back(att);
+        assert(att->image.isValid());
+        auto img = &store.images[att->image.handle];
+        imagePtrs.push_back(img);
+    }
+
+    print(out, "// Render Pass: {}\n{{\n", name);
+    print(out, "    std::array {}_attachmentDescs = {{\n", name);
+    for (auto att: attachmentPtrs) print(out, "        {}_desc,\n", att->name);
+    print(out, "    }};\n\n");
+
+    bool depthInput{false}, colorInput{false}, swapChainInput{false}, swapChainRelativeExtent{false};
+    uint32_t minHeight = UINT32_MAX, minWidth = UINT32_MAX;
+    std::vector<VkAttachmentReference> colorRefs, depthRefs;
+    colorRefs.reserve(attachments.size());
+    depthRefs.reserve(1);
+
+    auto attachmentsIdx = std::views::zip(std::views::iota(0), attachmentPtrs, imagePtrs);
+    for (auto&& [binding, att, img] : attachmentsIdx) {
+        const auto& usage = img->imageInfo.usage;
+        bool isSampled = (usage & VK_IMAGE_USAGE_SAMPLED_BIT) != 0;
+        const VkExtent3D& imageExtent = img->imageInfo.extent;
+        if (imageExtent.height < minHeight) minHeight = imageExtent.height;
+        if (imageExtent.width < minWidth) minWidth = imageExtent.width;
+        if (img->extentType == ExtentType::SwapchainRelative) swapChainRelativeExtent = true;
+
+        if (img->isSwapchainImage) {
+            colorRefs.emplace_back(binding, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+            swapChainInput = true;
+            continue;
+        }
+        if (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) {
+            colorRefs.emplace_back(binding, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+            colorInput |= isSampled;
+        }
+        if (usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+            depthRefs.emplace_back(binding, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+            depthInput |= isSampled;
+        }
+    }
+
+    if (!colorRefs.empty()) {
+        print(out, "    std::array {}_colorRefs{{\n", name);
+        for (const auto& ref : colorRefs)
+            print(out, "        VkAttachmentReference{{.attachment = {}, .layout = {}}},\n",
+                ref.attachment, string_VkImageLayout(ref.layout));
+        print(out, "    }};\n\n");
+    }
+
+    if (!depthRefs.empty()) {
+        print(out, "    std::array {}_depthRefs{{\n", name);
+        for (const auto& ref : depthRefs)
+            print(out, "        VkAttachmentReference{{.attachment = {}, .layout = {}}},\n",
+                ref.attachment, string_VkImageLayout(ref.layout));
+        print(out, "    }};\n\n");
+    }
+
+    print(out,
+        "    VkSubpassDescription {}_subpass{{\n"
+        "        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,\n"
+        "        .colorAttachmentCount = {},\n"
+        "        .pColorAttachments = {},\n"
+        "        .pDepthStencilAttachment = {}\n"
+        "    }};\n\n",
+        name,
+        colorRefs.empty() ? "0" : std::format("{}_colorRefs.size()", name),
+        colorRefs.empty() ? "nullptr" : std::format("{}_colorRefs.data()", name),
+        depthRefs.empty() ? "nullptr" : std::format("{}_depthRefs.data()", name)
+    );
+
+    print(out, "    std::array {}_subpassDeps{{\n", name);
+    if (depthInput) {
+        print(out,
+            "        VkSubpassDependency{{VK_SUBPASS_EXTERNAL, 0, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, "
+            "VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT}},\n"
+            "        VkSubpassDependency{{0, VK_SUBPASS_EXTERNAL, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, "
+            "VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT}},\n");
+    } else {
+        print(out,
+            "        VkSubpassDependency{{VK_SUBPASS_EXTERNAL, 0, "
+            "VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, "
+            "VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, "
+            "VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, "
+            "VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT}},\n");
+    }
+    if (colorInput) {
+        print(out,
+            "        VkSubpassDependency{{VK_SUBPASS_EXTERNAL, 0, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, "
+            "VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_MEMORY_READ_BIT, "
+            "VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT}},\n"
+            "        VkSubpassDependency{{0, VK_SUBPASS_EXTERNAL, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, "
+            "VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, "
+            "VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT}},\n");
+    } else {
+        print(out,
+            "        VkSubpassDependency{{VK_SUBPASS_EXTERNAL, 0, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, "
+            "VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, "
+            "VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT}},\n");
+    }
+    print(out, "    }};\n");
+
+    print(out,
+        "    VkRenderPassCreateInfo {0}_rpInfo{{\n"
+        "        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,\n"
+        "        .attachmentCount = {0}_attachmentDescs.size(),\n"
+        "        .pAttachments = {0}_attachmentDescs.data(),\n"
+        "        .subpassCount = 1,\n"
+        "        .pSubpasses = &{0}_subpass,\n"
+        "        .dependencyCount = {0}_subpassDeps.size(),\n"
+        "        .pDependencies = {0}_subpassDeps.data()\n"
+        "    }};\n\n"
+        "    vkchk(vkCreateRenderPass(device, &{0}_rpInfo, nullptr, &{0}));\n\n",
+        name
+    );
+
+    std::string extent_width = swapChainRelativeExtent ? "swapChainExtent.width" : std::format("{}", minWidth);
+    std::string extent_height = swapChainRelativeExtent ? "swapChainExtent.height" : std::format("{}", minHeight);
+
+    if (swapChainInput) {
+        print(out, "    {0}_framebuffers.reserve(swapChainImages.size());\n"
+                   "    for (size_t i = 0; i < swapChainImages.size(); i++) {{\n"
+                   "        std::array views{{\n", name);
+        for (auto img : imagePtrs) {
+            if (img->isSwapchainImage) print(out, "            {}_views[i],\n", img->name);
+            else print(out, "            {}_view,\n", img->name);
+        }
+        print(out,
+            "        }};\n\n"
+            "        VkFramebufferCreateInfo info{{.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, "
+            ".renderPass = {0}, .attachmentCount = views.size(), .pAttachments = views.data(), "
+            ".width = {1}, .height = {2}, .layers = 1}};\n\n"
+            "        VkFramebuffer framebuffer;\n"
+            "        vkchk(vkCreateFramebuffer(device, &info, nullptr, &framebuffer));\n"
+            "        {0}_framebuffers.push_back(framebuffer);\n"
+            "    }}\n", name, extent_width, extent_height);
+    } else {
+        print(out, "    std::array {}_views{{\n", name);
+        for (auto img : imagePtrs) print(out, "        {}_view,\n", img->name);
+        print(out,
+            "    }};\n\n"
+            "    VkFramebufferCreateInfo fbufInfo{{.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, "
+            ".renderPass = {0}, .attachmentCount = {0}_views.size(), .pAttachments = {0}_views.data(), "
+            ".width = {1}, .height = {2}, .layers = 1}};\n\n"
+            "    vkchk(vkCreateFramebuffer(device, &fbufInfo, nullptr, &{0}_framebuffer));\n",
+            name, extent_width, extent_height);
+    }
+
+    print(out, "    {0}_renderArea = VkRect2D{{.offset = {{0, 0}}, .extent = {{{1}, {2}}}}};\n", name, extent_width, extent_height);
+    print(out, "    {}_clearValues = {{\n", name);
+    for (const auto& attHandle : attachments) {
+        const auto& att = store.attachments[attHandle.handle];
+        const auto& img = store.images[att.image.handle];
+        if (img.imageInfo.usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
+            print(out, "        VkClearValue{{.depthStencil = {{{:.6f}f, {}}}}},\n",
+                att.clearValue.depthStencil.depth, att.clearValue.depthStencil.stencil);
+        else
+            print(out, "        VkClearValue{{.color = {{{{{:.6f}f, {:.6f}f, {:.6f}f, {:.6f}f}}}}}},\n",
+                att.clearValue.color.float32[0], att.clearValue.color.float32[1],
+                att.clearValue.color.float32[2], att.clearValue.color.float32[3]);
+    }
+    print(out, "    }};\n}}\n\n");
+}
+
+void RenderPass::generateDestroy(const Store& store, std::ostream& out) const {
+    assert(!name.empty());
+    assert(!attachments.empty());
+
+    print(out, "    // Destroy RenderPass: {}\n", name);
+    if (rendersToSwapchain(store)) {
+        print(out,
+            "    for (auto framebuffer : {0}_framebuffers)\n"
+            "        vkDestroyFramebuffer(device, framebuffer, nullptr);\n"
+            "    {0}_framebuffers.clear();\n", name);
+    } else {
+        print(out,
+            "   if ({0}_framebuffer != VK_NULL_HANDLE) {{\n"
+            "       vkDestroyFramebuffer(device, {0}_framebuffer, nullptr);\n"
+            "       {0}_framebuffer = VK_NULL_HANDLE;\n"
+            "   }}\n", name);
+    }
+    print(out,
+        "   if ({0} != VK_NULL_HANDLE) {{\n"
+        "       vkDestroyRenderPass(device, {0}, nullptr);\n"
+        "       {0} = VK_NULL_HANDLE;\n"
+        "   }}\n\n", name);
+}
+
 } // namespace primitives
