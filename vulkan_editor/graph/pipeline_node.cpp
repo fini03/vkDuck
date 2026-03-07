@@ -1,5 +1,6 @@
 #define _USE_MATH_DEFINES
 #include "pipeline_node.h"
+#include "../config/vulkan_enums.h"
 #include "../util/logger.h"
 #include "../shader/shader_reflection.h"
 #include "node_graph.h"
@@ -24,89 +25,27 @@ constexpr float PADDING_X = 10.0f;
 
 static std::set<std::string> generatedGlobalTypes;
 
-template <
-    typename T,
-    std::size_t N>
-std::vector<const char*> createEnumStringList(
-    const std::array<
-        T,
-        N>& enumValues,
-    const char* (*stringFunc)(T)
-) {
-    std::vector<const char*> strings;
-    strings.reserve(N);
-    for (const auto& value : enumValues) {
-        strings.push_back(stringFunc(value));
-    }
-    return strings;
-}
-
-constexpr std::array<VkPolygonMode, 4> polygonModesEnum{
-    VK_POLYGON_MODE_FILL, VK_POLYGON_MODE_LINE, VK_POLYGON_MODE_POINT,
-    VK_POLYGON_MODE_FILL_RECTANGLE_NV
-};
-
-constexpr std::array<VkCullModeFlagBits, 3> cullModesEnum{
-    VK_CULL_MODE_NONE, VK_CULL_MODE_BACK_BIT, VK_CULL_MODE_FRONT_BIT
-};
-
-constexpr std::array<VkFrontFace, 2> frontFaceOptionsEnum{
-    VK_FRONT_FACE_CLOCKWISE,
-    VK_FRONT_FACE_COUNTER_CLOCKWISE,
-};
-
-constexpr std::array<VkCompareOp, 8> depthCompareOptionsEnum{
-    VK_COMPARE_OP_NEVER,
-    VK_COMPARE_OP_LESS,
-    VK_COMPARE_OP_EQUAL,
-    VK_COMPARE_OP_LESS_OR_EQUAL,
-    VK_COMPARE_OP_GREATER,
-    VK_COMPARE_OP_NOT_EQUAL,
-    VK_COMPARE_OP_GREATER_OR_EQUAL,
-    VK_COMPARE_OP_ALWAYS
-};
-
-constexpr std::array<VkSampleCountFlagBits, 7> sampleCountOptionsEnum{
-    VK_SAMPLE_COUNT_1_BIT,  VK_SAMPLE_COUNT_2_BIT,
-    VK_SAMPLE_COUNT_4_BIT,  VK_SAMPLE_COUNT_8_BIT,
-    VK_SAMPLE_COUNT_16_BIT, VK_SAMPLE_COUNT_32_BIT,
-    VK_SAMPLE_COUNT_64_BIT
-};
-
-constexpr std::array<VkLogicOp, 16> logicOpsEnum{
-    VK_LOGIC_OP_CLEAR,         VK_LOGIC_OP_AND,
-    VK_LOGIC_OP_AND_REVERSE,   VK_LOGIC_OP_COPY,
-    VK_LOGIC_OP_AND_INVERTED,  VK_LOGIC_OP_NO_OP,
-    VK_LOGIC_OP_XOR,           VK_LOGIC_OP_OR,
-    VK_LOGIC_OP_NOR,           VK_LOGIC_OP_EQUIVALENT,
-    VK_LOGIC_OP_INVERT,        VK_LOGIC_OP_OR_REVERSE,
-    VK_LOGIC_OP_COPY_INVERTED, VK_LOGIC_OP_OR_INVERTED,
-    VK_LOGIC_OP_NAND,          VK_LOGIC_OP_SET,
-};
-
+// Use centralized Vulkan enum configuration
 const std::vector<const char*> PipelineNode::polygonModes =
-    createEnumStringList(polygonModesEnum, string_VkPolygonMode);
+    VkEnumConfig::getPolygonModeStrings();
 
 const std::vector<const char*> PipelineNode::cullModes =
-    createEnumStringList(cullModesEnum, string_VkCullModeFlagBits);
+    VkEnumConfig::getCullModeStrings();
 
 const std::vector<const char*> PipelineNode::frontFaceOptions =
-    createEnumStringList(frontFaceOptionsEnum, string_VkFrontFace);
+    VkEnumConfig::getFrontFaceStrings();
 
 const std::vector<const char*> PipelineNode::depthCompareOptions =
-    createEnumStringList(depthCompareOptionsEnum, string_VkCompareOp);
+    VkEnumConfig::getDepthCompareStrings();
 
 const std::vector<const char*> PipelineNode::sampleCountOptions =
-    createEnumStringList(
-        sampleCountOptionsEnum, string_VkSampleCountFlagBits
-    );
+    VkEnumConfig::getSampleCountStrings();
 
 const std::vector<const char*> PipelineNode::logicOps =
-    createEnumStringList(logicOpsEnum, string_VkLogicOp);
+    VkEnumConfig::getLogicOpStrings();
 
-const std::vector<const char*> PipelineNode::colorWriteMaskNames = {
-    "Red", "Green", "Blue", "Alpha"
-};
+const std::vector<const char*> PipelineNode::colorWriteMaskNames =
+    VkEnumConfig::getColorWriteMaskNames();
 
 namespace ed = ax::NodeEditor;
 
@@ -1257,7 +1196,7 @@ void PipelineNode::createPrimitives(primitives::Store& store) {
 
     // Get effective sample count (clamped to device limits)
     VkSampleCountFlagBits sampleCount =
-        sampleCountOptionsEnum[settings.rasterizationSamples];
+        VkEnumConfig::sampleCountOptions[settings.rasterizationSamples];
     VkSampleCountFlagBits maxSupported = store.getMaxSampleCount();
     if (sampleCount > maxSupported) {
         Log::warning(
@@ -1435,10 +1374,10 @@ void PipelineNode::createPrimitives(primitives::Store& store) {
     pipeline.rasterizer.rasterizerDiscardEnable =
         settings.rasterizerDiscard ? VK_TRUE : VK_FALSE;
     pipeline.rasterizer.polygonMode =
-        polygonModesEnum[settings.polygonMode];
-    pipeline.rasterizer.cullMode = cullModesEnum[settings.cullMode];
+        VkEnumConfig::polygonModes[settings.polygonMode];
+    pipeline.rasterizer.cullMode = VkEnumConfig::cullModes[settings.cullMode];
     pipeline.rasterizer.frontFace =
-        frontFaceOptionsEnum[settings.frontFace];
+        VkEnumConfig::frontFaceOptions[settings.frontFace];
     pipeline.rasterizer.depthBiasEnable =
         settings.depthBiasEnabled ? VK_TRUE : VK_FALSE;
     pipeline.rasterizer.depthBiasConstantFactor =
@@ -1449,7 +1388,7 @@ void PipelineNode::createPrimitives(primitives::Store& store) {
     pipeline.rasterizer.lineWidth = settings.lineWidth;
 
     pipeline.multisampling.rasterizationSamples =
-        sampleCountOptionsEnum[settings.rasterizationSamples];
+        VkEnumConfig::sampleCountOptions[settings.rasterizationSamples];
     pipeline.multisampling.sampleShadingEnable =
         settings.sampleShading ? VK_TRUE : VK_FALSE;
 
@@ -1458,7 +1397,7 @@ void PipelineNode::createPrimitives(primitives::Store& store) {
     pipeline.depthStencil.depthWriteEnable =
         settings.depthWrite ? VK_TRUE : VK_FALSE;
     pipeline.depthStencil.depthCompareOp =
-        depthCompareOptionsEnum[settings.depthCompareOp];
+        VkEnumConfig::depthCompareOptions[settings.depthCompareOp];
     pipeline.depthStencil.depthBoundsTestEnable =
         settings.depthBoundsTest ? VK_TRUE : VK_FALSE;
     pipeline.depthStencil.stencilTestEnable =
@@ -1466,7 +1405,7 @@ void PipelineNode::createPrimitives(primitives::Store& store) {
 
     pipeline.colorBlending.logicOpEnable =
         settings.logicOpEnable ? VK_TRUE : VK_FALSE;
-    pipeline.colorBlending.logicOp = logicOpsEnum[settings.logicOp];
+    pipeline.colorBlending.logicOp = VkEnumConfig::logicOps[settings.logicOp];
     std::copy(
         std::begin(settings.blendConstants),
         std::end(settings.blendConstants),

@@ -1,5 +1,6 @@
 #pragma once
 #include "../asset/model_manager.h"
+#include "../config/vulkan_enums.h"
 #include "node.h"
 #include "pin_registry.h"
 #include "vulkan_editor/io/serialization.h"
@@ -81,15 +82,8 @@ private:
  */
 class ModelNode : public Node, public ISerializable {
 public:
-    constexpr static std::array<VkPrimitiveTopology, 6>
-        topologyOptionsEnum{
-            VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
-            VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
-            VK_PRIMITIVE_TOPOLOGY_LINE_STRIP,
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN
-        };
+    // Use centralized Vulkan enum configuration
+    static constexpr auto& topologyOptionsEnum = VkEnumConfig::topologyOptions;
 
     ModelNode();
     ModelNode(int id);
@@ -195,6 +189,7 @@ private:
     primitives::CameraType cameraType{primitives::CameraType::Fixed};
     primitives::StoreHandle lightUboArray{};
     primitives::UniformBuffer* lightUbo{nullptr};
+    primitives::Light* lightPrimitive{nullptr};
 
     // Per-node model matrices (allows different transforms per node)
     std::vector<ModelMatrices> modelMatricesData;

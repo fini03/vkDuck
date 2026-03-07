@@ -86,6 +86,9 @@ editor_files = files(
   # Utilities
   'vulkan_editor/util/logger.cpp',
 
+  # Configuration
+  'vulkan_editor/config/vulkan_enums.cpp',
+
   # UI
   'vulkan_editor/asset/asset_library_ui.cpp',
   'vulkan_editor/ui/pipeline_editor_ui.cpp',

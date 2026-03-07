@@ -31,26 +31,9 @@ constexpr const char* LOG_CATEGORY = "ModelNode";
 namespace ed = ax::NodeEditor;
 namespace fs = std::filesystem;
 
-template <
-    typename T,
-    std::size_t N>
-std::vector<const char*> createEnumStringList(
-    const std::array<
-        T,
-        N>& enumValues,
-    const char* (*stringFunc)(T)
-) {
-    std::vector<const char*> strings;
-    strings.reserve(N);
-    for (const auto& value : enumValues) {
-        strings.push_back(stringFunc(value));
-    }
-    return strings;
-}
+// Use centralized Vulkan enum configuration
 const std::vector<const char*> ModelNode::topologyOptions =
-    createEnumStringList(
-        topologyOptionsEnum, string_VkPrimitiveTopology
-    );
+    VkEnumConfig::getTopologyStrings();
 
 // EditorImage destructor is now in model_manager.cpp
 
@@ -452,6 +435,7 @@ void ModelNode::clearPrimitives() {
     cameraUbo = nullptr;
     lightUboArray = {};
     lightUbo = nullptr;
+    lightPrimitive = nullptr;
     modelMatricesData.clear();
 }
 
@@ -662,6 +646,22 @@ void ModelNode::createPrimitives(primitives::Store& store) {
 
         lightUbo->dataType = primitives::UniformDataType::Light;
         lightUbo->data = lightsBuffer.getSpan();
+
+        // Create Light primitive for code generation (links to the UBO)
+        primitives::StoreHandle hLight = store.newLight();
+        lightPrimitive = &store.lights[hLight.handle];
+        lightPrimitive->name = name + "_lights";
+        lightPrimitive->ubo = hLightUbo;
+        lightPrimitive->numLights = static_cast<int>(lightsBuffer.lights.size());
+
+        // Copy light data for code generation
+        lightPrimitive->lights.resize(lightPrimitive->numLights);
+        for (int i = 0; i < lightPrimitive->numLights; ++i) {
+            lightPrimitive->lights[i].position = lightsBuffer.lights[i].position;
+            lightPrimitive->lights[i].color = lightsBuffer.lights[i].color;
+            lightPrimitive->lights[i].radius = lightsBuffer.lights[i].radius;
+            lightPrimitive->lights[i].intensity = lightsBuffer.lights[i].intensity;
+        }
 
         lightUboArray = store.newArray();
         auto& lgtArray = store.arrays[lightUboArray.handle];

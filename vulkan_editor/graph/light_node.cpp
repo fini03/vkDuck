@@ -1,5 +1,6 @@
 #include "light_node.h"
 #include "node_graph.h"
+#include "pin_helpers.h"
 #include "../util/logger.h"
 #include "external/utilities/builders.h"
 #include "external/utilities/widgets.h"
@@ -124,20 +125,11 @@ void LightNode::fromJson(const nlohmann::json& j) {
 }
 
 void LightNode::createDefaultPins() {
-    lightArrayPin.id = ax::NodeEditor::PinId(GetNextGlobalId());
-    lightArrayPin.type = PinType::UniformBuffer;
-    lightArrayPin.label = "light";
+    lightArrayPin = PinHelpers::createPin(PinType::UniformBuffer, "light");
 }
 
 void LightNode::registerPins(PinRegistry& registry) {
-    // Register the light array output pin
-    lightArrayPinHandle = registry.registerPinWithId(
-        id,
-        lightArrayPin.id,  // Use existing ID for backwards compatibility
-        lightArrayPin.type,
-        PinKind::Output,
-        lightArrayPin.label
-    );
+    lightArrayPinHandle = PinHelpers::registerPin(registry, id, lightArrayPin, PinKind::Output);
     usesRegistry = true;
 }
 
@@ -272,6 +264,7 @@ void LightNode::createPrimitives(primitives::Store& store) {
         lightPrimitive->lights[i].position = lightsBuffer.lights[i].position;
         lightPrimitive->lights[i].color = lightsBuffer.lights[i].color;
         lightPrimitive->lights[i].radius = lightsBuffer.lights[i].radius;
+        lightPrimitive->lights[i].intensity = lightsBuffer.lights[i].intensity;
     }
 
     // Create array with single UBO

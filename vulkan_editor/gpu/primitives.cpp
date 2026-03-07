@@ -2955,25 +2955,44 @@ void UniformBuffer::generateCreate(const Store& store, std::ostream& out) const 
                     return s + "f";
                 };
 
+                // Generate light buffer initialization with header + array
+                // Buffer format: LightsHeader (16 bytes) + Light[numLights]
+                print(out, "\n    // Initialize light UBO with header + {} lights\n", light.numLights);
+
+                // Generate the header struct (must match shader's Lights.numLights layout)
+                print(out,
+                    "    struct LightsHeader {{\n"
+                    "        int32_t numLights;\n"
+                    "        int32_t _pad[3];\n"
+                    "    }};\n"
+                );
+
+                // Generate header initialization
+                print(out, "    LightsHeader {}_header{{ .numLights = {} }};\n", name, light.numLights);
+
                 // Generate light array initialization
-                print(out, "\n    // Initialize light UBO with {} lights\n", light.numLights);
-                print(out, "    std::array<Light, {}> {}_initData{{{{\n", light.numLights, name);
+                print(out, "    std::array<Light, {}> {}_lights{{{{\n", light.numLights, name);
                 for (int i = 0; i < light.numLights && i < static_cast<int>(light.lights.size()); ++i) {
                     const auto& l = light.lights[i];
                     print(out,
                         "        Light{{\n"
                         "            .position = glm::vec3({}, {}, {}),\n"
                         "            .radius = {},\n"
-                        "            .color = glm::vec3({}, {}, {})\n"
+                        "            .color = glm::vec3({}, {}, {}),\n"
+                        "            .intensity = {}\n"
                         "        }}{}\n",
                         flt(l.position.x), flt(l.position.y), flt(l.position.z),
                         flt(l.radius),
                         flt(l.color.x), flt(l.color.y), flt(l.color.z),
+                        flt(l.intensity),
                         (i < light.numLights - 1) ? "," : ""
                     );
                 }
                 print(out, "    }}}};\n");
-                print(out, "    memcpy({}_mapped, {}_initData.data(), sizeof({}_initData));\n", name, name, name);
+
+                // Copy header first, then light array
+                print(out, "    memcpy({}_mapped, &{}_header, sizeof(LightsHeader));\n", name, name);
+                print(out, "    memcpy(static_cast<uint8_t*>({}_mapped) + sizeof(LightsHeader), {}_lights.data(), sizeof({}_lights));\n", name, name, name);
                 break;
             }
         }

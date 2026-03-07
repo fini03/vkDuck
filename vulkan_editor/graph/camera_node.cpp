@@ -1,5 +1,6 @@
 #include "camera_node.h"
 #include "node_graph.h"
+#include "pin_helpers.h"
 #include "../util/logger.h"
 #include "external/utilities/builders.h"
 #include "external/utilities/widgets.h"
@@ -48,20 +49,11 @@ CameraNodeBase::CameraNodeBase(int id)
 CameraNodeBase::~CameraNodeBase() {}
 
 void CameraNodeBase::createDefaultPins() {
-    cameraPin.id = ax::NodeEditor::PinId(GetNextGlobalId());
-    cameraPin.type = PinType::UniformBuffer;
-    cameraPin.label = "Camera";
+    cameraPin = PinHelpers::createPin(PinType::UniformBuffer, "Camera");
 }
 
 void CameraNodeBase::registerPins(PinRegistry& registry) {
-    // Register the camera output pin
-    cameraPinHandle = registry.registerPinWithId(
-        id,
-        cameraPin.id,  // Use existing ID for backwards compatibility
-        cameraPin.type,
-        PinKind::Output,
-        cameraPin.label
-    );
+    cameraPinHandle = PinHelpers::registerPin(registry, id, cameraPin, PinKind::Output);
     usesRegistry = true;
 }
 

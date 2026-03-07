@@ -21,8 +21,6 @@ using namespace ShaderTypes;
 
 struct GlobalSceneConfig;
 class NodeGraph;
-extern const std::vector<const char*> topologyOptions;
-extern const std::array<VkPrimitiveTopology, 11> topologyOptionsEnum;
 
 struct ProviderInfo {
     std::string provider;
