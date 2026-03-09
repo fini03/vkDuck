@@ -10,7 +10,9 @@ using namespace ShaderTypes;
 class ShaderManager;
 class PipelineSettingsUI;
 class PipelineNode;
-class ModelNode;
+class VertexDataNode;
+class UBONode;
+class MaterialNode;
 class PresentNode;
 class LightNode;
 class CameraNodeBase;
@@ -83,7 +85,9 @@ private:
     float rightPaneWidth = 800.0f;
 
     PipelineNode* selectedPipeline = nullptr;
-    ModelNode* selectedModel = nullptr;
+    VertexDataNode* selectedVertexData = nullptr;
+    UBONode* selectedUBO = nullptr;
+    MaterialNode* selectedMaterial = nullptr;
     PresentNode* selectedPresent = nullptr;
     CameraNodeBase* selectedCamera = nullptr;
     LightNode* selectedLight = nullptr;
@@ -98,9 +102,19 @@ public:
     void ApplyNodePositionsToEditor();
 
     /**
-     * @brief Get the currently selected model node (if any).
+     * @brief Get the currently selected model-related nodes (if any).
      */
-    ModelNode* getSelectedModelNode() const { return selectedModel; }
+    VertexDataNode* getSelectedVertexDataNode() const { return selectedVertexData; }
+    UBONode* getSelectedUBONode() const { return selectedUBO; }
+    MaterialNode* getSelectedMaterialNode() const { return selectedMaterial; }
+
+    /**
+     * @brief Get ALL model-related nodes in the graph.
+     * Used for "Use in Node" to assign a model to all model subnodes at once.
+     */
+    std::vector<VertexDataNode*> getAllVertexDataNodes() const;
+    std::vector<UBONode*> getAllUBONodes() const;
+    std::vector<MaterialNode*> getAllMaterialNodes() const;
 
     void* m_HeaderBackground = nullptr;
 };

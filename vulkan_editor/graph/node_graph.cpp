@@ -2,10 +2,12 @@
 #include "camera_node.h"
 #include "fixed_camera_node.h"
 #include "light_node.h"
-#include "model_node.h"
+#include "material_node.h"
 #include "node.h"
 #include "pipeline_node.h"
 #include "present_node.h"
+#include "ubo_node.h"
+#include "vertex_data_node.h"
 #include <iostream>
 #include <stdexcept>
 
@@ -45,22 +47,34 @@ PinEntry* NodeGraph::findPinEntry(ax::NodeEditor::PinId id) {
 // Helper to find a pin and its parent node
 PinLookupResult NodeGraph::findPin(ax::NodeEditor::PinId id) {
     for (const auto& node : nodes) {
-        // --- Handle ModelNode ---
-        if (auto* model = dynamic_cast<ModelNode*>(node.get())) {
-            if (model->modelMatrixPin.id == id)
+        // --- Handle VertexDataNode ---
+        if (auto* vertexData = dynamic_cast<VertexDataNode*>(node.get())) {
+            if (vertexData->vertexDataPin.id == id)
                 return {
-                    model, &model->modelMatrixPin, NodePinKind::Output
+                    vertexData, &vertexData->vertexDataPin, NodePinKind::Output
                 };
-            if (model->texturePin.id == id)
-                return {model, &model->texturePin, NodePinKind::Output};
-            if (model->vertexDataPin.id == id)
-                return {
-                    model, &model->vertexDataPin, NodePinKind::Output
-                };
-            if (model->cameraPin.id == id)
-                return {model, &model->cameraPin, NodePinKind::Output};
-            if (model->lightPin.id == id)
-                return {model, &model->lightPin, NodePinKind::Output};
+        }
+
+        // --- Handle UBONode ---
+        if (auto* ubo = dynamic_cast<UBONode*>(node.get())) {
+            if (ubo->modelMatrixPin.id == id)
+                return {ubo, &ubo->modelMatrixPin, NodePinKind::Output};
+            if (ubo->cameraPin.id == id)
+                return {ubo, &ubo->cameraPin, NodePinKind::Output};
+            if (ubo->lightPin.id == id)
+                return {ubo, &ubo->lightPin, NodePinKind::Output};
+        }
+
+        // --- Handle MaterialNode ---
+        if (auto* material = dynamic_cast<MaterialNode*>(node.get())) {
+            if (material->baseColorPin.id == id)
+                return {material, &material->baseColorPin, NodePinKind::Output};
+            if (material->emissivePin.id == id)
+                return {material, &material->emissivePin, NodePinKind::Output};
+            if (material->metallicRoughnessPin.id == id)
+                return {material, &material->metallicRoughnessPin, NodePinKind::Output};
+            if (material->normalPin.id == id)
+                return {material, &material->normalPin, NodePinKind::Output};
         }
 
         // --- Handle all Camera types (Orbital, Fixed) ---
@@ -155,12 +169,17 @@ void NodeGraph::removeNode(ed::NodeId nodeId) {
     std::unordered_set<ax::NodeEditor::PinId> pinsToRemove;
 
     // Handle different node types
-    if (auto* model = dynamic_cast<ModelNode*>(nodeToRemove)) {
-        pinsToRemove.insert(model->modelMatrixPin.id);
-        pinsToRemove.insert(model->texturePin.id);
-        pinsToRemove.insert(model->vertexDataPin.id);
-        pinsToRemove.insert(model->cameraPin.id);
-        pinsToRemove.insert(model->lightPin.id);
+    if (auto* vertexData = dynamic_cast<VertexDataNode*>(nodeToRemove)) {
+        pinsToRemove.insert(vertexData->vertexDataPin.id);
+    } else if (auto* ubo = dynamic_cast<UBONode*>(nodeToRemove)) {
+        pinsToRemove.insert(ubo->modelMatrixPin.id);
+        pinsToRemove.insert(ubo->cameraPin.id);
+        pinsToRemove.insert(ubo->lightPin.id);
+    } else if (auto* material = dynamic_cast<MaterialNode*>(nodeToRemove)) {
+        pinsToRemove.insert(material->baseColorPin.id);
+        pinsToRemove.insert(material->emissivePin.id);
+        pinsToRemove.insert(material->metallicRoughnessPin.id);
+        pinsToRemove.insert(material->normalPin.id);
     } else if (auto* camera =
                    dynamic_cast<CameraNodeBase*>(nodeToRemove)) {
         pinsToRemove.insert(camera->cameraPin.id);
@@ -235,11 +254,17 @@ void NodeGraph::buildDependencies() {
     for (const auto& nodePtr : nodes) {
         Node* node = nodePtr.get();
 
-        if (auto* model = dynamic_cast<ModelNode*>(node)) {
-            pinInfo[model->modelMatrixPin.id] = node;
-            pinInfo[model->texturePin.id] = node;
-            pinInfo[model->vertexDataPin.id] = node;
-            pinInfo[model->cameraPin.id] = node;
+        if (auto* vertexData = dynamic_cast<VertexDataNode*>(node)) {
+            pinInfo[vertexData->vertexDataPin.id] = node;
+        } else if (auto* ubo = dynamic_cast<UBONode*>(node)) {
+            pinInfo[ubo->modelMatrixPin.id] = node;
+            pinInfo[ubo->cameraPin.id] = node;
+            pinInfo[ubo->lightPin.id] = node;
+        } else if (auto* material = dynamic_cast<MaterialNode*>(node)) {
+            pinInfo[material->baseColorPin.id] = node;
+            pinInfo[material->emissivePin.id] = node;
+            pinInfo[material->metallicRoughnessPin.id] = node;
+            pinInfo[material->normalPin.id] = node;
         } else if (auto* camera = dynamic_cast<CameraNodeBase*>(node)) {
             pinInfo[camera->cameraPin.id] = node;
         } else if (auto* light = dynamic_cast<LightNode*>(node)) {

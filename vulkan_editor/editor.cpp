@@ -6,8 +6,11 @@
 #include "external/SimpleFileDialog.h"
 #include "graph/fixed_camera_node.h"
 #include "graph/fps_camera_node.h"
-#include "graph/model_node.h"
+#include "graph/material_node.h"
+// #include "graph/model_node.h"  // DEPRECATED
 #include "graph/node_graph.h"
+#include "graph/ubo_node.h"
+#include "graph/vertex_data_node.h"
 #include "shader/shader_manager.h"
 #include "asset/asset_library_ui.h"
 #include "ui/camera_editor_ui.h"
@@ -50,14 +53,37 @@ Editor::Editor(
     // Initialize global ModelManager pointer
     g_modelManager = &modelManager;
 
-    // Set up Asset Library callback to assign models to selected model node
+    // Set up Asset Library callback to assign models to ALL model subnodes
     AssetLibraryUI::setModelSelectedCallback([this](ModelHandle handle) {
-        ModelNode* selectedModelNode = pipelineEditor->getSelectedModelNode();
-        if (selectedModelNode && g_modelManager->isLoaded(handle)) {
-            selectedModelNode->setModel(handle);
-            Log::info("Editor", "Assigned model to selected node");
-        } else if (!selectedModelNode) {
-            Log::warning("Editor", "No model node selected - select a Model Node first");
+        if (!g_modelManager->isLoaded(handle)) {
+            Log::warning("Editor", "Model not loaded");
+            return;
+        }
+
+        // Get all model nodes of each type and assign the model to all of them
+        auto vertexDataNodes = pipelineEditor->getAllVertexDataNodes();
+        auto uboNodes = pipelineEditor->getAllUBONodes();
+        auto materialNodes = pipelineEditor->getAllMaterialNodes();
+
+        size_t totalAssigned = 0;
+
+        for (auto* node : vertexDataNodes) {
+            node->setModel(handle);
+            ++totalAssigned;
+        }
+        for (auto* node : uboNodes) {
+            node->setModel(handle);
+            ++totalAssigned;
+        }
+        for (auto* node : materialNodes) {
+            node->setModel(handle);
+            ++totalAssigned;
+        }
+
+        if (totalAssigned > 0) {
+            Log::info("Editor", "Assigned model to {} model node(s)", totalAssigned);
+        } else {
+            Log::warning("Editor", "No model nodes in graph - add VertexData, UBO, or Material nodes first");
         }
     });
 }

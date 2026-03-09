@@ -517,7 +517,7 @@ void ModelNode::createPrimitives(primitives::Store& store) {
     for (size_t i = 0; i < modelData.ranges.size(); ++i) {
         const auto& range = modelData.ranges[i];
         assert(range.materialIndex >= 0);
-        int imgIdx = materials[range.materialIndex].baseTextureIndex;
+        int imgIdx = materials[range.materialIndex].baseColorTextureIndex;
 
         if (imgIdx < 0 || !imageHandles[imgIdx].isValid()) {
             if (!textureNotFound.isValid())

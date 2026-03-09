@@ -13,6 +13,7 @@ struct Vertex {
     glm::vec3 pos;
     glm::vec3 normal;
     glm::vec2 texCoord;
+    glm::vec4 tangent;  // xyz = tangent direction, w = handedness for bitangent
 
     static VkVertexInputBindingDescription getBindingDescription() {
         VkVertexInputBindingDescription bindingDescription{};
@@ -23,7 +24,7 @@ struct Vertex {
     }
 
     static std::vector<VkVertexInputAttributeDescription> getAttributeDescriptions() {
-        std::vector<VkVertexInputAttributeDescription> attributeDescriptions(3);
+        std::vector<VkVertexInputAttributeDescription> attributeDescriptions(4);
 
         attributeDescriptions[0].binding = 0;
         attributeDescriptions[0].location = 0;
@@ -40,12 +41,17 @@ struct Vertex {
         attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
         attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
 
+        attributeDescriptions[3].binding = 0;
+        attributeDescriptions[3].location = 3;
+        attributeDescriptions[3].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        attributeDescriptions[3].offset = offsetof(Vertex, tangent);
+
         return attributeDescriptions;
     }
 
     bool operator==(const Vertex& other) const {
         return pos == other.pos && normal == other.normal &&
-               texCoord == other.texCoord;
+               texCoord == other.texCoord && tangent == other.tangent;
     }
 };
 // }}}
@@ -95,13 +101,29 @@ struct GeometryRange {
     int materialIndex;
 };
 
+struct MaterialData {
+    // Texture indices into ModelData::allTexturePaths (-1 = not present)
+    int baseColorTextureIndex{-1};
+    int emissiveTextureIndex{-1};
+    int metallicRoughnessTextureIndex{-1};
+    int normalTextureIndex{-1};
+
+    // PBR factors (used when texture is missing or as multipliers)
+    glm::vec4 baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};
+    glm::vec3 emissiveFactor{0.0f, 0.0f, 0.0f};
+    float metallicFactor{1.0f};
+    float roughnessFactor{1.0f};
+};
+
 struct ModelData {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     std::vector<GeometryRange> ranges;
     std::vector<GLTFCamera> cameras;        // Embedded cameras from GLTF
     std::vector<GLTFLight> lights;          // Embedded lights from GLTF (KHR_lights_punctual)
-    std::vector<std::string> texturePaths;  // Resolved texture paths per material
+    std::vector<MaterialData> materials;    // PBR material data per material
+    std::vector<std::string> allTexturePaths;  // All unique texture paths (indexed by MaterialData)
+    std::vector<std::string> texturePaths;  // DEPRECATED: Legacy single texture path per material
 };
 // }}}
 

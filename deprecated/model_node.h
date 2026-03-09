@@ -1,6 +1,7 @@
 #pragma once
 #include "../asset/model_manager.h"
 #include "../config/vulkan_enums.h"
+#include "model_types.h"
 #include "node.h"
 #include "pin_registry.h"
 #include "vulkan_editor/io/serialization.h"
@@ -15,17 +16,6 @@ using namespace ShaderTypes;
 
 // EditorImage, EditorMaterial, EditorGeometryRange, ConsolidatedModelData
 // are now defined in model_manager.h to avoid circular dependencies
-
-struct ModelMatrices {
-    alignas(16) glm::mat4 model{1.0f};
-    alignas(16) glm::mat4 normalMatrix{1.0f};
-};
-
-struct ModelCameraData {
-    alignas(16) glm::mat4 view{1.0f};
-    alignas(16) glm::mat4 invView{1.0f};
-    alignas(16) glm::mat4 proj{1.0f};
-};
 
 // Use primitives::LightData directly for shader compatibility
 using LightData = primitives::LightData;

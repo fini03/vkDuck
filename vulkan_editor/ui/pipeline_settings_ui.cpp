@@ -1,7 +1,7 @@
 #include "pipeline_settings_ui.h"
-#include "../graph/model_node.h"
 #include "../graph/node_graph.h"
 #include "../graph/pipeline_node.h"
+#include "../graph/vertex_data_node.h"
 #include "../shader/shader_manager.h"
 #include "attachment_editor_ui.h"
 #include "camera_editor_ui.h"
@@ -177,23 +177,19 @@ void PipelineSettingsUI::Draw(
     // Input Assembly
     ImGui::Text("Input Assembly");
 
-    // Helper lambda to find a connected ModelNode
-    auto findConnectedModel = [&]() -> ModelNode* {
-        for (const auto& binding : selectedNode->inputBindings) {
-            auto& pin = binding.pin;
-            // Check links for this specific pin
+    // Helper lambda to find a connected VertexDataNode
+    auto findConnectedVertexData = [&]() -> VertexDataNode* {
+        // Check the vertex data pin
+        if (selectedNode->vertexDataPin.id.Get() != 0) {
             for (const auto& link : graph.links) {
-                if (link.endPin == pin.id) {
+                if (link.endPin == selectedNode->vertexDataPin.id) {
                     // Find the source node
                     for (auto& nodePtr : graph.nodes) {
-                        if (auto* modelNode = dynamic_cast<ModelNode*>(
+                        if (auto* vertexNode = dynamic_cast<VertexDataNode*>(
                                 nodePtr.get()
                             )) {
-                            if (modelNode->modelMatrixPin.id ==
-                                    link.startPin ||
-                                modelNode->texturePin.id ==
-                                    link.startPin) {
-                                return modelNode;
+                            if (vertexNode->vertexDataPin.id == link.startPin) {
+                                return vertexNode;
                             }
                         }
                     }
@@ -203,33 +199,21 @@ void PipelineSettingsUI::Draw(
         return nullptr;
     };
 
-    ModelNode* connectedModel = findConnectedModel();
+    VertexDataNode* connectedVertexData = findConnectedVertexData();
 
-    if (connectedModel) {
-        // Sync logic
-        selectedNode->settings.inputAssembly =
-            connectedModel->settings.topology;
-        selectedNode->settings.primitiveRestart =
-            connectedModel->settings.primitiveRestart;
-
+    if (connectedVertexData && connectedVertexData->hasModel()) {
+        // Topology is determined by the GLTF geometry primitive mode
         ImGui::PushStyleColor(
             ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.6f, 1.0f)
         );
         ImGui::TextWrapped(
-            "Topology: %s",
-            ModelNode::topologyOptions[selectedNode->settings
-                                           .inputAssembly]
+            "Topology determined by connected model geometry"
         );
-        ImGui::TextWrapped(
-            "Primitive Restart: %s",
-            selectedNode->settings.primitiveRestart ? "Enabled"
-                                                    : "Disabled"
-        );
-        ImGui::Text("(Managed by connected Model)");
+        ImGui::Text("(Triangle List is most common)");
         ImGui::PopStyleColor();
     } else {
         // Fallback if no model is connected
-        ImGui::Text("No Model connected to provide Topology.");
+        ImGui::Text("No Vertex Data connected to provide Topology.");
     }
 
     // Rasterizer

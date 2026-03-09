@@ -4,7 +4,6 @@
 #include "../util/logger.h"
 #include "external/utilities/builders.h"
 #include "external/utilities/widgets.h"
-#include "model_node.h"
 #include <vkDuck/model_loader.h> // For GLTFCamera definition
 #include <imgui.h>
 

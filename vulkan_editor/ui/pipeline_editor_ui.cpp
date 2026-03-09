@@ -11,9 +11,12 @@
 #include "vulkan_editor/graph/fixed_camera_node.h"
 #include "vulkan_editor/graph/fps_camera_node.h"
 #include "vulkan_editor/graph/light_node.h"
-#include "vulkan_editor/graph/model_node.h"
+#include "vulkan_editor/graph/material_node.h"
+// #include "vulkan_editor/graph/model_node.h"  // DEPRECATED
 #include "vulkan_editor/graph/pipeline_node.h"
 #include "vulkan_editor/graph/present_node.h"
+#include "vulkan_editor/graph/ubo_node.h"
+#include "vulkan_editor/graph/vertex_data_node.h"
 #include "vulkan_editor/shader/shader_manager.h"
 
 #include "external/utilities/builders.h"
@@ -132,7 +135,7 @@ void PipelineEditorUI::DrawPaneHeader(float paneWidth) {
     // Dynamic header based on selection
     if (selectedPipeline) {
         ImGui::TextUnformatted("Pipeline Settings");
-    } else if (selectedModel) {
+    } else if (selectedVertexData || selectedUBO || selectedMaterial) {
         ImGui::TextUnformatted("Model Settings");
     } else {
         ImGui::TextUnformatted("Node Settings");
@@ -146,22 +149,37 @@ void PipelineEditorUI::DrawNodeSettings(ShaderManager* shaderManager) {
         PipelineSettingsUI::Draw(
             selectedPipeline, graph, shaderManager
         );
-    } else if (selectedModel) {
-        ModelSettingsUI::Draw(selectedModel, shaderManager, &graph);
-    } else if (selectedCamera) {
-        // Find a model node with GLTF cameras for the orbital camera
-        // dropdown
-        ModelNode* modelWithCameras = nullptr;
-        for (const auto& node : graph.nodes) {
-            if (auto* model = dynamic_cast<ModelNode*>(node.get())) {
-                const CachedModel* cached = model->getCachedModel();
-                if (cached && !cached->cameras.empty()) {
-                    modelWithCameras = model;
-                    break;
-                }
-            }
+    } else if (selectedVertexData) {
+        ImGui::TextWrapped("Vertex Data Node");
+        ImGui::Separator();
+        if (selectedVertexData->hasModel()) {
+            ImGui::Text("Model: %s", selectedVertexData->modelPath);
+        } else {
+            ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "No model loaded");
+            ImGui::TextWrapped("Select a model from the Asset Library.");
         }
-        CameraEditorUI::Draw(selectedCamera, &graph, modelWithCameras);
+    } else if (selectedUBO) {
+        ImGui::TextWrapped("UBO Node (Matrices/Camera/Light)");
+        ImGui::Separator();
+        if (selectedUBO->hasModel()) {
+            ImGui::Text("Model: %s", selectedUBO->modelPath);
+            // TODO: Add camera/light selection UI here
+        } else {
+            ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "No model loaded");
+            ImGui::TextWrapped("Select a model from the Asset Library.");
+        }
+    } else if (selectedMaterial) {
+        ImGui::TextWrapped("Material Node (PBR Textures)");
+        ImGui::Separator();
+        if (selectedMaterial->hasModel()) {
+            ImGui::Text("Model: %s", selectedMaterial->modelPath);
+        } else {
+            ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "No model loaded");
+            ImGui::TextWrapped("Select a model from the Asset Library.");
+        }
+    } else if (selectedCamera) {
+        // GLTF camera dropdown disabled - use UBO node for GLTF cameras
+        CameraEditorUI::Draw(selectedCamera, &graph, nullptr);
     } else if (selectedLight) {
         LightEditorUI::Draw(selectedLight);
     } else if (selectedPresent) {
@@ -416,10 +434,20 @@ void PipelineEditorUI::DeleteNodes() {
                     deletedId) {
                 selectedPipeline = nullptr;
             }
-            if (selectedModel &&
-                static_cast<uint64_t>(selectedModel->getId()) ==
+            if (selectedVertexData &&
+                static_cast<uint64_t>(selectedVertexData->getId()) ==
                     deletedId) {
-                selectedModel = nullptr;
+                selectedVertexData = nullptr;
+            }
+            if (selectedUBO &&
+                static_cast<uint64_t>(selectedUBO->getId()) ==
+                    deletedId) {
+                selectedUBO = nullptr;
+            }
+            if (selectedMaterial &&
+                static_cast<uint64_t>(selectedMaterial->getId()) ==
+                    deletedId) {
+                selectedMaterial = nullptr;
             }
             if (selectedPresent &&
                 static_cast<uint64_t>(selectedPresent->getId()) ==
@@ -530,7 +558,9 @@ void PipelineEditorUI::UpdateSelectedNode(ed::NodeId selectedNodeId) {
         if (static_cast<uint64_t>(node->getId()) ==
             selectedNodeId.Get()) {
             selectedPipeline = dynamic_cast<PipelineNode*>(node.get());
-            selectedModel = dynamic_cast<ModelNode*>(node.get());
+            selectedVertexData = dynamic_cast<VertexDataNode*>(node.get());
+            selectedUBO = dynamic_cast<UBONode*>(node.get());
+            selectedMaterial = dynamic_cast<MaterialNode*>(node.get());
             selectedCamera = dynamic_cast<CameraNodeBase*>(node.get());
             selectedLight = dynamic_cast<LightNode*>(node.get());
             selectedPresent = dynamic_cast<PresentNode*>(node.get());
@@ -541,10 +571,45 @@ void PipelineEditorUI::UpdateSelectedNode(ed::NodeId selectedNodeId) {
 
 void PipelineEditorUI::ClearSelection() {
     selectedPipeline = nullptr;
-    selectedModel = nullptr;
+    selectedVertexData = nullptr;
+    selectedUBO = nullptr;
+    selectedMaterial = nullptr;
     selectedCamera = nullptr;
     selectedLight = nullptr;
     selectedPresent = nullptr;
+}
+
+// ============================================================================
+// Get All Model Nodes
+// ============================================================================
+std::vector<VertexDataNode*> PipelineEditorUI::getAllVertexDataNodes() const {
+    std::vector<VertexDataNode*> result;
+    for (const auto& node : graph.nodes) {
+        if (auto* vertexData = dynamic_cast<VertexDataNode*>(node.get())) {
+            result.push_back(vertexData);
+        }
+    }
+    return result;
+}
+
+std::vector<UBONode*> PipelineEditorUI::getAllUBONodes() const {
+    std::vector<UBONode*> result;
+    for (const auto& node : graph.nodes) {
+        if (auto* ubo = dynamic_cast<UBONode*>(node.get())) {
+            result.push_back(ubo);
+        }
+    }
+    return result;
+}
+
+std::vector<MaterialNode*> PipelineEditorUI::getAllMaterialNodes() const {
+    std::vector<MaterialNode*> result;
+    for (const auto& node : graph.nodes) {
+        if (auto* material = dynamic_cast<MaterialNode*>(node.get())) {
+            result.push_back(material);
+        }
+    }
+    return result;
 }
 
 // ============================================================================
@@ -611,11 +676,30 @@ void PipelineEditorUI::ShowBackgroundContextMenu(
         setNodePosition(nodePtr);
     }
 
-    if (ImGui::MenuItem("Model Node")) {
-        auto model = std::make_unique<ModelNode>();
-        auto* nodePtr = model.get();
-        graph.addNode(std::move(model));
-        setNodePosition(nodePtr);
+    // Model submenu with specialized node types
+    if (ImGui::BeginMenu("Model")) {
+        if (ImGui::MenuItem("Vertex Data")) {
+            auto node = std::make_unique<VertexDataNode>();
+            auto* nodePtr = node.get();
+            graph.addNode(std::move(node));
+            setNodePosition(nodePtr);
+        }
+
+        if (ImGui::MenuItem("UBO (Matrices/Camera/Light)")) {
+            auto node = std::make_unique<UBONode>();
+            auto* nodePtr = node.get();
+            graph.addNode(std::move(node));
+            setNodePosition(nodePtr);
+        }
+
+        if (ImGui::MenuItem("Material (PBR Textures)")) {
+            auto node = std::make_unique<MaterialNode>();
+            auto* nodePtr = node.get();
+            graph.addNode(std::move(node));
+            setNodePosition(nodePtr);
+        }
+
+        ImGui::EndMenu();
     }
 
     bool presentExists = HasPresentNode();

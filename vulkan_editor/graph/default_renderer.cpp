@@ -2,9 +2,11 @@
 #include "../asset/model_manager.h"
 #include "fixed_camera_node.h"
 #include "light_node.h"
-#include "model_node.h"
+#include "material_node.h"
 #include "pipeline_node.h"
 #include "present_node.h"
+#include "ubo_node.h"
+#include "vertex_data_node.h"
 #include "../util/logger.h"
 #include "../shader/shader_manager.h"
 
@@ -12,12 +14,14 @@ namespace fs = std::filesystem;
 
 bool DefaultRendererSetup::createForModel(
     NodeGraph& graph,
-    ModelNode* modelNode,
+    VertexDataNode* vertexDataNode,
+    UBONode* uboNode,
+    MaterialNode* materialNode,
     ShaderManager& shaderManager,
     const fs::path& projectRoot
 ) {
-    if (!modelNode) {
-        Log::error("DefaultRenderer", "Cannot create renderer: modelNode is null");
+    if (!vertexDataNode) {
+        Log::error("DefaultRenderer", "Cannot create renderer: vertexDataNode is null");
         return false;
     }
 
@@ -35,22 +39,22 @@ bool DefaultRendererSetup::createForModel(
         return false;
     }
 
-    Log::info("DefaultRenderer", "Creating default renderer for model: {}", modelNode->name);
+    Log::info("DefaultRenderer", "Creating default renderer for model nodes");
 
-    // Get model node position for layout
-    ImVec2 modelPos = modelNode->position;
+    // Get vertex data node position for layout
+    ImVec2 basePos = vertexDataNode->position;
 
-    // Camera setup: use GLTF camera if available, otherwise create a fixed camera
-    const CachedModel* cached = modelNode->getCachedModel();
+    // Camera setup: use GLTF camera if available via UBONode, otherwise create a fixed camera
+    const CachedModel* cached = uboNode ? uboNode->getCachedModel() : nullptr;
     bool useGLTFCamera = cached && !cached->cameras.empty();
     FixedCameraNode* fixedCamPtr = nullptr;
     ax::NodeEditor::PinId cameraPinToConnect;
 
-    if (useGLTFCamera) {
+    if (useGLTFCamera && uboNode) {
         // Use the first GLTF camera from the model
-        modelNode->selectedCameraIndex = 0;
-        modelNode->updateCameraFromSelection();
-        cameraPinToConnect = modelNode->cameraPin.id;
+        uboNode->selectedCameraIndex = 0;
+        uboNode->updateCameraFromSelection();
+        cameraPinToConnect = uboNode->cameraPin.id;
         Log::info("DefaultRenderer", "Using GLTF camera '{}' from model",
                   cached->cameras[0].name);
     } else {
@@ -58,7 +62,7 @@ bool DefaultRendererSetup::createForModel(
         auto cameraNode = std::make_unique<FixedCameraNode>();
         cameraNode->name = "Default Camera";
         // Set the node graph UI position
-        static_cast<Node*>(cameraNode.get())->position = ImVec2(modelPos.x - 300, modelPos.y - 100);
+        static_cast<Node*>(cameraNode.get())->position = ImVec2(basePos.x - 300, basePos.y - 100);
         // Set camera world position (looking at origin from a distance)
         cameraNode->setPosition(glm::vec3(0.0f, 2.0f, 5.0f));
         cameraNode->setTarget(glm::vec3(0.0f, 0.0f, 0.0f));
@@ -73,7 +77,7 @@ bool DefaultRendererSetup::createForModel(
     // Create Light Node
     auto lightNode = std::make_unique<LightNode>();
     lightNode->name = "Default Light";
-    lightNode->position = ImVec2(modelPos.x - 300, modelPos.y + 100);
+    lightNode->position = ImVec2(basePos.x - 300, basePos.y + 100);
     lightNode->numLights = 1;
     lightNode->ensureLightCount();
     // Position light above and to the side
@@ -87,7 +91,7 @@ bool DefaultRendererSetup::createForModel(
     // Create Pipeline Node with default Phong shaders
     auto pipelineNode = std::make_unique<PipelineNode>();
     pipelineNode->name = "Default Phong";
-    pipelineNode->position = ImVec2(modelPos.x + 300, modelPos.y);
+    pipelineNode->position = ImVec2(basePos.x + 300, basePos.y);
     pipelineNode->isMainPipeline = true;
 
     // Set shader paths (project-relative)
@@ -113,13 +117,11 @@ bool DefaultRendererSetup::createForModel(
     // Create Present Node
     auto presentNode = std::make_unique<PresentNode>();
     presentNode->name = "Screen";
-    presentNode->position = ImVec2(modelPos.x + 600, modelPos.y);
+    presentNode->position = ImVec2(basePos.x + 600, basePos.y);
     PresentNode* presentPtr = presentNode.get();
     graph.addNode(std::move(presentNode));
 
     // Now create links between nodes
-    // We need to find the correct pins on the pipeline node
-
     // Helper lambda to find input pin by label
     auto findInputPin = [&](PipelineNode* pipe, const std::string& label) -> ax::NodeEditor::PinId {
         for (const auto& binding : pipe->inputBindings) {
@@ -148,39 +150,43 @@ bool DefaultRendererSetup::createForModel(
         return ax::NodeEditor::PinId();
     };
 
-    // Link model vertex data to pipeline
+    // Link vertex data to pipeline
     if (pipelinePtr->vertexDataPin.id.Get() != 0) {
         Link vertexLink;
         vertexLink.id = ax::NodeEditor::LinkId(Node::GetNextGlobalId());
-        vertexLink.startPin = modelNode->vertexDataPin.id;
+        vertexLink.startPin = vertexDataNode->vertexDataPin.id;
         vertexLink.endPin = pipelinePtr->vertexDataPin.id;
         graph.addLink(vertexLink);
-        Log::debug("DefaultRenderer", "Linked: Model vertex data -> Pipeline vertex data");
+        Log::debug("DefaultRenderer", "Linked: VertexData -> Pipeline vertex data");
     }
 
-    // Link model matrix to pipeline (look for "modelMatrices" binding)
-    ax::NodeEditor::PinId modelMatrixInputPin = findInputPin(pipelinePtr, "modelMatrices");
-    if (modelMatrixInputPin.Get() != 0) {
-        Link matrixLink;
-        matrixLink.id = ax::NodeEditor::LinkId(Node::GetNextGlobalId());
-        matrixLink.startPin = modelNode->modelMatrixPin.id;
-        matrixLink.endPin = modelMatrixInputPin;
-        graph.addLink(matrixLink);
-        Log::debug("DefaultRenderer", "Linked: Model matrix -> Pipeline modelMatrices");
+    // Link UBO model matrix to pipeline (look for "modelMatrices" binding)
+    if (uboNode) {
+        ax::NodeEditor::PinId modelMatrixInputPin = findInputPin(pipelinePtr, "modelMatrices");
+        if (modelMatrixInputPin.Get() != 0) {
+            Link matrixLink;
+            matrixLink.id = ax::NodeEditor::LinkId(Node::GetNextGlobalId());
+            matrixLink.startPin = uboNode->modelMatrixPin.id;
+            matrixLink.endPin = modelMatrixInputPin;
+            graph.addLink(matrixLink);
+            Log::debug("DefaultRenderer", "Linked: UBO matrix -> Pipeline modelMatrices");
+        }
     }
 
-    // Link model texture to pipeline (look for "texSampler" binding)
-    ax::NodeEditor::PinId texSamplerPin = findInputPin(pipelinePtr, "texSampler");
-    if (texSamplerPin.Get() != 0) {
-        Link texLink;
-        texLink.id = ax::NodeEditor::LinkId(Node::GetNextGlobalId());
-        texLink.startPin = modelNode->texturePin.id;
-        texLink.endPin = texSamplerPin;
-        graph.addLink(texLink);
-        Log::debug("DefaultRenderer", "Linked: Model texture -> Pipeline texSampler");
+    // Link material texture to pipeline (look for "texSampler" binding)
+    if (materialNode) {
+        ax::NodeEditor::PinId texSamplerPin = findInputPin(pipelinePtr, "texSampler");
+        if (texSamplerPin.Get() != 0) {
+            Link texLink;
+            texLink.id = ax::NodeEditor::LinkId(Node::GetNextGlobalId());
+            texLink.startPin = materialNode->baseColorPin.id;
+            texLink.endPin = texSamplerPin;
+            graph.addLink(texLink);
+            Log::debug("DefaultRenderer", "Linked: Material baseColor -> Pipeline texSampler");
+        }
     }
 
-    // Link camera to pipeline (either GLTF camera from model or fixed camera)
+    // Link camera to pipeline
     if (pipelinePtr->hasCameraInput && cameraPinToConnect.Get() != 0) {
         Link cameraLink;
         cameraLink.id = ax::NodeEditor::LinkId(Node::GetNextGlobalId());
@@ -218,8 +224,7 @@ bool DefaultRendererSetup::createForModel(
         Log::debug("DefaultRenderer", "Linked: Pipeline output -> Present");
     }
 
-    Log::info("DefaultRenderer", "Default renderer created successfully with {} nodes and {} links",
-              4, graph.links.size());
+    Log::info("DefaultRenderer", "Default renderer created successfully");
 
     return true;
 }

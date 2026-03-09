@@ -1,26 +1,47 @@
 #include "model_settings_ui.h"
-#include "../graph/model_node.h"
+#include "../asset/model_manager.h"
+#include "../graph/model_node_base.h"
+#include "../graph/vertex_data_node.h"
+#include "../graph/ubo_node.h"
+#include "../graph/material_node.h"
 #include "../graph/node_graph.h"
-#include "../graph/default_renderer.h"
 #include "../shader/shader_manager.h"
 #include <glm/gtc/constants.hpp>
 #include <imgui.h>
 
 namespace fs = std::filesystem;
 
-void ModelSettingsUI::Draw(ModelNode* modelNode, ShaderManager* shaderManager, NodeGraph* graph) {
-    if (!modelNode) {
+void ModelSettingsUI::Draw(
+    ModelNodeBase* node,
+    ShaderManager* shaderManager,
+    NodeGraph* graph
+) {
+    if (!node) {
         ImGui::TextWrapped("No model node selected.");
         return;
     }
 
-    ImGui::Text("Model Node Settings");
+    // Draw common model info
+    DrawModelInfo(node);
+
+    // Dispatch to specific node type UI
+    if (auto* vertexData = dynamic_cast<VertexDataNode*>(node)) {
+        DrawVertexDataSettings(vertexData);
+    } else if (auto* ubo = dynamic_cast<UBONode*>(node)) {
+        DrawUBOSettings(ubo);
+    } else if (auto* material = dynamic_cast<MaterialNode*>(node)) {
+        DrawMaterialSettings(material);
+    }
+}
+
+void ModelSettingsUI::DrawModelInfo(ModelNodeBase* node) {
+    ImGui::Text("%s Settings", node->name.c_str());
     ImGui::Separator();
 
     // Model info (read-only, selection happens in Asset Library tab)
-    const CachedModel* cached = modelNode->getCachedModel();
+    const CachedModel* cached = node->getCachedModel();
 
-    if (modelNode->settings.modelPath[0] == '\0') {
+    if (node->modelPath[0] == '\0') {
         ImGui::TextColored(
             ImVec4(0.7f, 0.7f, 0.4f, 1.0f),
             "No model assigned"
@@ -28,7 +49,7 @@ void ModelSettingsUI::Draw(ModelNode* modelNode, ShaderManager* shaderManager, N
         ImGui::TextWrapped(
             "Use the Asset Library tab to load and assign a model to this node."
         );
-    } else if (modelNode->hasModel() && cached) {
+    } else if (node->hasModel() && cached) {
         // Model is loaded - show info
         ImGui::TextColored(
             ImVec4(0.5f, 0.9f, 0.5f, 1.0f),
@@ -39,7 +60,7 @@ void ModelSettingsUI::Draw(ModelNode* modelNode, ShaderManager* shaderManager, N
         ImGui::TextColored(
             ImVec4(0.6f, 0.6f, 0.6f, 1.0f),
             "Path: %s",
-            modelNode->settings.modelPath
+            node->modelPath
         );
 
         // Model stats
@@ -58,76 +79,54 @@ void ModelSettingsUI::Draw(ModelNode* modelNode, ShaderManager* shaderManager, N
                 cached->lights.size()
             );
         }
-
-        // Create Default Renderer button
-        if (graph && shaderManager) {
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.5f, 1.0f), "Quick Setup");
-            ImGui::TextWrapped("Create a basic Phong rendering setup for this model with camera, light, and output.");
-
-            if (ImGui::Button("Create Default Renderer", ImVec2(-1, 0))) {
-                fs::path projectRoot = shaderManager->getProjectRoot();
-                bool success = DefaultRendererSetup::createForModel(
-                    *graph, modelNode, *shaderManager, projectRoot
-                );
-                if (success) {
-                    ImGui::OpenPopup("DefaultRendererCreated");
-                } else {
-                    ImGui::OpenPopup("DefaultRendererFailed");
-                }
-            }
-
-            // Success popup
-            if (ImGui::BeginPopupModal("DefaultRendererCreated", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-                ImGui::Text("Default renderer created successfully!");
-                ImGui::TextWrapped("Camera, Light, Pipeline, and Present nodes have been added and connected.");
-                if (ImGui::Button("OK", ImVec2(120, 0))) {
-                    ImGui::CloseCurrentPopup();
-                }
-                ImGui::EndPopup();
-            }
-
-            // Failure popup
-            if (ImGui::BeginPopupModal("DefaultRendererFailed", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Failed to create default renderer.");
-                ImGui::TextWrapped("Check if default_phong shaders exist in project/shaders/");
-                if (ImGui::Button("OK", ImVec2(120, 0))) {
-                    ImGui::CloseCurrentPopup();
-                }
-                ImGui::EndPopup();
-            }
-        }
     } else {
         // Model path set but not loaded
-        ModelHandle handle = modelNode->getModelHandle();
+        ModelHandle handle = node->getModelHandle();
         ModelStatus status = g_modelManager ? g_modelManager->getStatus(handle) : ModelStatus::NotLoaded;
 
         if (status == ModelStatus::Loading) {
             ImGui::TextColored(
                 ImVec4(0.8f, 0.8f, 0.4f, 1.0f),
                 "Loading: %s",
-                modelNode->settings.modelPath
+                node->modelPath
             );
         } else if (status == ModelStatus::Error) {
             ImGui::TextColored(
                 ImVec4(0.9f, 0.4f, 0.4f, 1.0f),
                 "Error loading: %s",
-                modelNode->settings.modelPath
+                node->modelPath
             );
         } else {
             ImGui::TextColored(
                 ImVec4(0.6f, 0.6f, 0.6f, 1.0f),
                 "Path: %s (not loaded)",
-                modelNode->settings.modelPath
+                node->modelPath
             );
         }
     }
 
     ImGui::Spacing();
+}
 
-    // GLTF Cameras dropdown (only show if model has cameras)
-    if (cached && !cached->cameras.empty()) {
+void ModelSettingsUI::DrawVertexDataSettings(VertexDataNode* node) {
+    const CachedModel* cached = node->getCachedModel();
+    if (!cached) return;
+
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.3f, 1.0f), "Vertex Data Output");
+    ImGui::TextWrapped(
+        "Outputs vertex/index data for %zu geometry ranges. "
+        "Connect to a Pipeline node's vertex data input.",
+        cached->modelData.getGeometryCount()
+    );
+}
+
+void ModelSettingsUI::DrawUBOSettings(UBONode* node) {
+    const CachedModel* cached = node->getCachedModel();
+    if (!cached) return;
+
+    // GLTF Cameras dropdown
+    if (!cached->cameras.empty()) {
         ImGui::Separator();
         ImGui::Text("GLTF Cameras");
 
@@ -139,19 +138,19 @@ void ModelSettingsUI::Draw(ModelNode* modelNode, ShaderManager* shaderManager, N
         }
 
         // selectedCameraIndex: -1 = none, 0+ = GLTF camera index
-        int comboIndex = modelNode->selectedCameraIndex + 1;
+        int comboIndex = node->selectedCameraIndex + 1;
         if (ImGui::Combo(
                 "Selected Camera", &comboIndex, cameraNames.data(),
                 static_cast<int>(cameraNames.size())
             )) {
-            modelNode->selectedCameraIndex = comboIndex - 1;
-            modelNode->updateCameraFromSelection();
+            node->selectedCameraIndex = comboIndex - 1;
+            node->updateCameraFromSelection();
         }
 
         // Show selected camera info
-        if (modelNode->selectedCameraIndex >= 0 &&
-            modelNode->selectedCameraIndex < static_cast<int>(cached->cameras.size())) {
-            const auto& cam = cached->cameras[modelNode->selectedCameraIndex];
+        if (node->selectedCameraIndex >= 0 &&
+            node->selectedCameraIndex < static_cast<int>(cached->cameras.size())) {
+            const auto& cam = cached->cameras[node->selectedCameraIndex];
             ImGui::TextColored(
                 ImVec4(0.7f, 0.9f, 0.7f, 1.0f), "Camera: %s",
                 cam.name.c_str()
@@ -181,8 +180,8 @@ void ModelSettingsUI::Draw(ModelNode* modelNode, ShaderManager* shaderManager, N
         ImGui::Spacing();
     }
 
-    // GLTF Lights info (only show if model has lights)
-    if (cached && !cached->lights.empty()) {
+    // GLTF Lights info
+    if (!cached->lights.empty()) {
         ImGui::Separator();
         ImGui::Text("GLTF Lights (%zu total)", cached->lights.size());
 
@@ -193,18 +192,18 @@ void ModelSettingsUI::Draw(ModelNode* modelNode, ShaderManager* shaderManager, N
         }
 
         // selectedLightIndex is used to view individual light details
-        if (modelNode->selectedLightIndex < 0 && !lightNames.empty()) {
-            modelNode->selectedLightIndex = 0;
+        if (node->selectedLightIndex < 0 && !lightNames.empty()) {
+            node->selectedLightIndex = 0;
         }
         ImGui::Combo(
-            "Inspect Light", &modelNode->selectedLightIndex, lightNames.data(),
+            "Inspect Light", &node->selectedLightIndex, lightNames.data(),
             static_cast<int>(lightNames.size())
         );
 
         // Show inspected light info
-        if (modelNode->selectedLightIndex >= 0 &&
-            modelNode->selectedLightIndex < static_cast<int>(cached->lights.size())) {
-            const auto& light = cached->lights[modelNode->selectedLightIndex];
+        if (node->selectedLightIndex >= 0 &&
+            node->selectedLightIndex < static_cast<int>(cached->lights.size())) {
+            const auto& light = cached->lights[node->selectedLightIndex];
             ImGui::TextColored(
                 ImVec4(0.9f, 0.9f, 0.7f, 1.0f), "Light: %s",
                 light.name.c_str()
@@ -256,15 +255,32 @@ void ModelSettingsUI::Draw(ModelNode* modelNode, ShaderManager* shaderManager, N
     }
 
     ImGui::Separator();
-    ImGui::Text("Input Assembly");
-    ImGui::Combo(
-        "Vertex Topology", &modelNode->settings.topology,
-        ModelNode::topologyOptions.data(),
-        static_cast<int>(ModelNode::topologyOptions.size())
+    ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.3f, 1.0f), "UBO Outputs");
+    ImGui::TextWrapped(
+        "Outputs model matrices for %zu geometry ranges. "
+        "Camera and light pins appear if the model contains them.",
+        cached->modelData.getGeometryCount()
     );
-    ImGui::Checkbox(
-        "Primitive Restart", &modelNode->settings.primitiveRestart
+}
+
+void ModelSettingsUI::DrawMaterialSettings(MaterialNode* node) {
+    const CachedModel* cached = node->getCachedModel();
+    if (!cached) return;
+
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.3f, 1.0f), "Material Outputs");
+    ImGui::TextWrapped(
+        "Outputs PBR texture arrays for %zu geometry ranges:\n"
+        "- Base Color\n"
+        "- Emissive\n"
+        "- Metallic-Roughness\n"
+        "- Normal Map\n\n"
+        "Missing textures use default fallbacks.",
+        cached->modelData.getGeometryCount()
     );
 
-    ImGui::Spacing();
+    // Show texture counts
+    size_t textureCount = cached->images.size();
+    size_t materialCount = cached->materials.size();
+    ImGui::Text("Textures: %zu  |  Materials: %zu", textureCount, materialCount);
 }

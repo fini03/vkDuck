@@ -3,10 +3,13 @@
 #include "../graph/fixed_camera_node.h"
 #include "../graph/fps_camera_node.h"
 #include "../graph/light_node.h"
-#include "../graph/model_node.h"
+#include "../graph/material_node.h"
+// #include "../graph/model_node.h"  // DEPRECATED - replaced by split nodes
 #include "../graph/node_graph.h"
 #include "../graph/pipeline_node.h"
 #include "../graph/present_node.h"
+#include "../graph/ubo_node.h"
+#include "../graph/vertex_data_node.h"
 #include "../shader/shader_manager.h"
 #include "../util/logger.h"
 #include <fstream>
@@ -252,29 +255,65 @@ std::unique_ptr<Node> NodeFactory::createFromJson(
 
         node = std::move(pipelineNode);
 
-    } else if (type == "model") {
-        auto modelNode = std::make_unique<ModelNode>(id);
-        modelNode->fromJson(jNode);
+    // NOTE: "model" type removed - ModelNode is deprecated
+    // Old projects using ModelNode will need to be migrated to the new split nodes
 
-        // Load model via ModelManager - stored path is relative to project root
-        if (modelNode->settings.modelPath[0] != '\0') {
+    } else if (type == "vertex_data") {
+        auto vertexDataNode = std::make_unique<VertexDataNode>(id);
+        vertexDataNode->fromJson(jNode);
+
+        // Load model via ModelManager if path is set
+        if (vertexDataNode->modelPath[0] != '\0') {
             namespace fs = std::filesystem;
-            fs::path relativePath = modelNode->settings.modelPath;
-
-            Log::debug(
-                "PipelineState",
-                "Loading model via ModelManager: {}",
-                relativePath.string()
-            );
-
-            // Store the saved camera selection before loading (loadModel resets it)
-            int savedCameraIndex = modelNode->selectedCameraIndex;
-            modelNode->loadModel(relativePath);
-            // Restore camera selection after model load
-            modelNode->selectedCameraIndex = savedCameraIndex;
+            fs::path relativePath = vertexDataNode->modelPath;
+            ModelHandle handle = g_modelManager->loadModel(relativePath);
+            if (g_modelManager->isLoaded(handle)) {
+                vertexDataNode->setModel(handle);
+            }
         }
 
-        node = std::move(modelNode);
+        node = std::move(vertexDataNode);
+
+    } else if (type == "ubo") {
+        auto uboNode = std::make_unique<UBONode>(id);
+        uboNode->fromJson(jNode);
+
+        // Load model via ModelManager if path is set
+        if (uboNode->modelPath[0] != '\0') {
+            namespace fs = std::filesystem;
+            fs::path relativePath = uboNode->modelPath;
+
+            // Store camera/light selection before loading
+            int savedCameraIndex = uboNode->selectedCameraIndex;
+            int savedLightIndex = uboNode->selectedLightIndex;
+
+            ModelHandle handle = g_modelManager->loadModel(relativePath);
+            if (g_modelManager->isLoaded(handle)) {
+                uboNode->setModel(handle);
+            }
+
+            // Restore selection after model load
+            uboNode->selectedCameraIndex = savedCameraIndex;
+            uboNode->selectedLightIndex = savedLightIndex;
+        }
+
+        node = std::move(uboNode);
+
+    } else if (type == "material") {
+        auto materialNode = std::make_unique<MaterialNode>(id);
+        materialNode->fromJson(jNode);
+
+        // Load model via ModelManager if path is set
+        if (materialNode->modelPath[0] != '\0') {
+            namespace fs = std::filesystem;
+            fs::path relativePath = materialNode->modelPath;
+            ModelHandle handle = g_modelManager->loadModel(relativePath);
+            if (g_modelManager->isLoaded(handle)) {
+                materialNode->setModel(handle);
+            }
+        }
+
+        node = std::move(materialNode);
 
     } else if (type == "present") {
         auto presentNode = std::make_unique<PresentNode>(id);
@@ -339,14 +378,24 @@ PipelineState::buildPinIdMap(NodeGraph& graph) const {
                 pinIdMap[pipeline->lightInput.pin.id.Get()] =
                     &pipeline->lightInput.pin;
             }
-        } else if (auto* model = dynamic_cast<ModelNode*>(node.get())) {
-            pinIdMap[model->modelMatrixPin.id.Get()] =
-                &model->modelMatrixPin;
-            pinIdMap[model->texturePin.id.Get()] = &model->texturePin;
-            pinIdMap[model->vertexDataPin.id.Get()] =
-                &model->vertexDataPin;
-            pinIdMap[model->cameraPin.id.Get()] = &model->cameraPin;
-            pinIdMap[model->lightPin.id.Get()] = &model->lightPin;
+        // ModelNode removed - deprecated
+        } else if (auto* vertexData =
+                       dynamic_cast<VertexDataNode*>(node.get())) {
+            pinIdMap[vertexData->vertexDataPin.id.Get()] =
+                &vertexData->vertexDataPin;
+        } else if (auto* ubo = dynamic_cast<UBONode*>(node.get())) {
+            pinIdMap[ubo->modelMatrixPin.id.Get()] = &ubo->modelMatrixPin;
+            pinIdMap[ubo->cameraPin.id.Get()] = &ubo->cameraPin;
+            pinIdMap[ubo->lightPin.id.Get()] = &ubo->lightPin;
+        } else if (auto* material =
+                       dynamic_cast<MaterialNode*>(node.get())) {
+            pinIdMap[material->baseColorPin.id.Get()] =
+                &material->baseColorPin;
+            pinIdMap[material->emissivePin.id.Get()] =
+                &material->emissivePin;
+            pinIdMap[material->metallicRoughnessPin.id.Get()] =
+                &material->metallicRoughnessPin;
+            pinIdMap[material->normalPin.id.Get()] = &material->normalPin;
         } else if (auto* present =
                        dynamic_cast<PresentNode*>(node.get())) {
             pinIdMap[present->imagePin.id.Get()] = &present->imagePin;

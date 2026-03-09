@@ -57,7 +57,11 @@ editor_files = files(
   'vulkan_editor/graph/pin_registry.cpp',
   'vulkan_editor/graph/validation_rules.cpp',
   'vulkan_editor/graph/pipeline_node.cpp',
-  'vulkan_editor/graph/model_node.cpp',
+  # 'vulkan_editor/graph/model_node.cpp',  # DEPRECATED - replaced by split nodes
+  'vulkan_editor/graph/model_node_base.cpp',
+  'vulkan_editor/graph/vertex_data_node.cpp',
+  'vulkan_editor/graph/ubo_node.cpp',
+  'vulkan_editor/graph/material_node.cpp',
   'vulkan_editor/graph/present_node.cpp',
   'vulkan_editor/graph/light_node.cpp',
   'vulkan_editor/graph/camera_node.cpp',

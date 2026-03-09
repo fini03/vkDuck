@@ -288,19 +288,25 @@ bool ModelManager::loadModelInternal(CachedModel& model) {
         Log::info(LOG_CATEGORY, "Found {} light(s) in model", model.lights.size());
     }
 
-    // Set up images and materials
-    model.materials.resize(libModelData.texturePaths.size());
-    model.images.resize(libModelData.texturePaths.size());
-
-    for (size_t i = 0; i < libModelData.texturePaths.size(); ++i) {
-        const auto& texPath = libModelData.texturePaths[i];
+    // Set up images from all unique texture paths
+    model.images.resize(libModelData.allTexturePaths.size());
+    for (size_t i = 0; i < libModelData.allTexturePaths.size(); ++i) {
+        const auto& texPath = libModelData.allTexturePaths[i];
         if (!texPath.empty()) {
             model.images[i].path = texPath;
             model.images[i].toLoad = true;
-            model.materials[i].baseTextureIndex = static_cast<int>(i);
-        } else {
-            model.materials[i].baseTextureIndex = -1;
         }
+    }
+
+    // Set up materials with all PBR texture indices
+    model.materials.resize(libModelData.materials.size());
+    for (size_t i = 0; i < libModelData.materials.size(); ++i) {
+        const auto& srcMat = libModelData.materials[i];
+        EditorMaterial& dstMat = model.materials[i];
+        dstMat.baseColorTextureIndex = srcMat.baseColorTextureIndex;
+        dstMat.emissiveTextureIndex = srcMat.emissiveTextureIndex;
+        dstMat.metallicRoughnessTextureIndex = srcMat.metallicRoughnessTextureIndex;
+        dstMat.normalTextureIndex = srcMat.normalTextureIndex;
     }
 
     // Load textures in parallel

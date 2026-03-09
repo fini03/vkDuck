@@ -267,9 +267,16 @@ void processNode(
                 texCoordAccessor = &model.accessors[primitive.attributes.at("TEXCOORD_0")];
             }
 
+            bool hasTangents = primitive.attributes.find("TANGENT") != primitive.attributes.end();
+            const tinygltf::Accessor* tangentAccessor = nullptr;
+            if (hasTangents) {
+                tangentAccessor = &model.accessors[primitive.attributes.at("TANGENT")];
+            }
+
             const tinygltf::BufferView& posBufferView = model.bufferViews[posAccessor.bufferView];
             const tinygltf::BufferView* normalBufferView = nullptr;
             const tinygltf::BufferView* texCoordBufferView = nullptr;
+            const tinygltf::BufferView* tangentBufferView = nullptr;
 
             if (hasNormals) {
                 normalBufferView = &model.bufferViews[normalAccessor->bufferView];
@@ -277,10 +284,14 @@ void processNode(
             if (hasTexCoords) {
                 texCoordBufferView = &model.bufferViews[texCoordAccessor->bufferView];
             }
+            if (hasTangents) {
+                tangentBufferView = &model.bufferViews[tangentAccessor->bufferView];
+            }
 
             const tinygltf::Buffer& posBuffer = model.buffers[posBufferView.buffer];
             const tinygltf::Buffer* normalBuffer = nullptr;
             const tinygltf::Buffer* texCoordBuffer = nullptr;
+            const tinygltf::Buffer* tangentBuffer = nullptr;
 
             if (hasNormals) {
                 normalBuffer = &model.buffers[normalBufferView->buffer];
@@ -288,22 +299,31 @@ void processNode(
             if (hasTexCoords) {
                 texCoordBuffer = &model.buffers[texCoordBufferView->buffer];
             }
+            if (hasTangents) {
+                tangentBuffer = &model.buffers[tangentBufferView->buffer];
+            }
 
             size_t posStride = posBufferView.byteStride ? posBufferView.byteStride : sizeof(float) * 3;
             size_t normalStride = (hasNormals && normalBufferView->byteStride)
                 ? normalBufferView->byteStride : sizeof(float) * 3;
             size_t texCoordStride = (hasTexCoords && texCoordBufferView->byteStride)
                 ? texCoordBufferView->byteStride : sizeof(float) * 2;
+            size_t tangentStride = (hasTangents && tangentBufferView->byteStride)
+                ? tangentBufferView->byteStride : sizeof(float) * 4;
 
             const uint8_t* posData = &posBuffer.data[posBufferView.byteOffset + posAccessor.byteOffset];
             const uint8_t* normalData = nullptr;
             const uint8_t* texCoordData = nullptr;
+            const uint8_t* tangentData = nullptr;
 
             if (hasNormals) {
                 normalData = &normalBuffer->data[normalBufferView->byteOffset + normalAccessor->byteOffset];
             }
             if (hasTexCoords) {
                 texCoordData = &texCoordBuffer->data[texCoordBufferView->byteOffset + texCoordAccessor->byteOffset];
+            }
+            if (hasTangents) {
+                tangentData = &tangentBuffer->data[tangentBufferView->byteOffset + tangentAccessor->byteOffset];
             }
 
             // Pre-allocate vertices based on accessor count (glTF vertices are already deduplicated)
@@ -331,6 +351,15 @@ void processNode(
                     vertex.texCoord = {tex[0], tex[1]};
                 } else {
                     vertex.texCoord = {0.0f, 0.0f};
+                }
+
+                if (hasTangents) {
+                    const float* tan = reinterpret_cast<const float*>(tangentData + i * tangentStride);
+                    glm::vec3 transformedTangent = normalMatrix * glm::vec3(tan[0], tan[1], tan[2]);
+                    vertex.tangent = glm::vec4(glm::normalize(transformedTangent), tan[3]);
+                } else {
+                    // Default tangent pointing along +X axis with positive handedness
+                    vertex.tangent = {1.0f, 0.0f, 0.0f, 1.0f};
                 }
             }
 
@@ -586,7 +615,7 @@ ModelData loadModel(const std::string& path, const std::string& projectRoot) {
     }
     // }}}
 
-    // Extract texture paths {{{
+    // Extract texture paths and material data {{{
     fs::path parentPath = fs::path(path).parent_path();
     fs::path projRoot = projectRoot.empty() ? fs::path() : fs::path(projectRoot);
 
@@ -604,16 +633,61 @@ ModelData loadModel(const std::string& path, const std::string& projectRoot) {
         parentPath, projRoot, texturesToResolve, model.images.size()
     );
 
-    // Store resolved texture paths (one per material)
-    result.texturePaths.resize(model.materials.size());
+    // Build mapping from GLTF image index to our allTexturePaths index
+    // This deduplicates textures used by multiple materials
+    std::unordered_map<int, int> imageIndexToPathIndex;
+    for (size_t i = 0; i < resolvedPaths.size(); ++i) {
+        if (!resolvedPaths[i].empty()) {
+            imageIndexToPathIndex[static_cast<int>(i)] = static_cast<int>(result.allTexturePaths.size());
+            result.allTexturePaths.push_back(resolvedPaths[i].string());
+        }
+    }
+
+    // Helper to get texture index from GLTF texture info
+    auto getTextureIndex = [&](int gltfTextureIndex) -> int {
+        if (gltfTextureIndex < 0 || static_cast<size_t>(gltfTextureIndex) >= model.textures.size()) {
+            return -1;
+        }
+        int imageIndex = model.textures[gltfTextureIndex].source;
+        auto it = imageIndexToPathIndex.find(imageIndex);
+        return (it != imageIndexToPathIndex.end()) ? it->second : -1;
+    };
+
+    // Extract all PBR material data
+    result.materials.resize(model.materials.size());
+    result.texturePaths.resize(model.materials.size()); // Legacy: keep for backwards compatibility
     for (size_t i = 0; i < model.materials.size(); ++i) {
         const auto& mat = model.materials[i];
-        int texIndex = mat.pbrMetallicRoughness.baseColorTexture.index;
-        if (texIndex >= 0 && static_cast<size_t>(texIndex) < model.textures.size()) {
-            int imageIndex = model.textures[texIndex].source;
-            if (imageIndex >= 0 && static_cast<size_t>(imageIndex) < resolvedPaths.size()) {
-                result.texturePaths[i] = resolvedPaths[imageIndex].string();
-            }
+        MaterialData& matData = result.materials[i];
+
+        // Base color texture
+        matData.baseColorTextureIndex = getTextureIndex(mat.pbrMetallicRoughness.baseColorTexture.index);
+        matData.baseColorFactor = glm::vec4(
+            static_cast<float>(mat.pbrMetallicRoughness.baseColorFactor[0]),
+            static_cast<float>(mat.pbrMetallicRoughness.baseColorFactor[1]),
+            static_cast<float>(mat.pbrMetallicRoughness.baseColorFactor[2]),
+            static_cast<float>(mat.pbrMetallicRoughness.baseColorFactor[3])
+        );
+
+        // Metallic-roughness texture
+        matData.metallicRoughnessTextureIndex = getTextureIndex(mat.pbrMetallicRoughness.metallicRoughnessTexture.index);
+        matData.metallicFactor = static_cast<float>(mat.pbrMetallicRoughness.metallicFactor);
+        matData.roughnessFactor = static_cast<float>(mat.pbrMetallicRoughness.roughnessFactor);
+
+        // Emissive texture
+        matData.emissiveTextureIndex = getTextureIndex(mat.emissiveTexture.index);
+        matData.emissiveFactor = glm::vec3(
+            static_cast<float>(mat.emissiveFactor[0]),
+            static_cast<float>(mat.emissiveFactor[1]),
+            static_cast<float>(mat.emissiveFactor[2])
+        );
+
+        // Normal texture
+        matData.normalTextureIndex = getTextureIndex(mat.normalTexture.index);
+
+        // Legacy: store base color path for backwards compatibility
+        if (matData.baseColorTextureIndex >= 0) {
+            result.texturePaths[i] = result.allTexturePaths[matData.baseColorTextureIndex];
         }
     }
     // }}}

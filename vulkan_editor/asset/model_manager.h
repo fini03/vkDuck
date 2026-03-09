@@ -28,7 +28,11 @@ struct EditorImage {
 };
 
 struct EditorMaterial {
-    int baseTextureIndex{-1};
+    // Texture indices into CachedModel::images array (-1 = not present)
+    int baseColorTextureIndex{-1};
+    int emissiveTextureIndex{-1};
+    int metallicRoughnessTextureIndex{-1};
+    int normalTextureIndex{-1};
 };
 
 struct EditorGeometryRange {

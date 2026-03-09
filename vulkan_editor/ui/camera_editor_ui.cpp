@@ -3,7 +3,7 @@
 #include "vulkan_editor/graph/camera_node.h"
 #include "vulkan_editor/graph/fixed_camera_node.h"
 #include "vulkan_editor/graph/fps_camera_node.h"
-#include "vulkan_editor/graph/model_node.h"
+#include "vulkan_editor/graph/ubo_node.h"
 #include "vulkan_editor/graph/node_graph.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
@@ -12,7 +12,7 @@
 void CameraEditorUI::Draw(
     CameraNodeBase* camera,
     NodeGraph* graph,
-    ModelNode* modelNode
+    UBONode* uboNode
 ) {
     if (!camera)
         return;
@@ -21,9 +21,9 @@ void CameraEditorUI::Draw(
 
     // Dispatch to specific camera type UI
     if (auto* orbital = dynamic_cast<OrbitalCameraNode*>(camera)) {
-        DrawOrbitalCamera(orbital, modelNode);
+        DrawOrbitalCamera(orbital, uboNode);
     } else if (auto* fps = dynamic_cast<FPSCameraNode*>(camera)) {
-        DrawFPSCamera(fps, modelNode);
+        DrawFPSCamera(fps, uboNode);
     } else if (auto* fixed = dynamic_cast<FixedCameraNode*>(camera)) {
         DrawFixedCamera(fixed);
     }
@@ -36,19 +36,11 @@ void CameraEditorUI::Draw(
 
 void CameraEditorUI::DrawOrbitalCamera(
     OrbitalCameraNode* camera,
-    ModelNode* modelNode
+    UBONode* uboNode
 ) {
-    // GLTF Cameras from model file (if model node provided and has cameras)
-    const CachedModel* cached = modelNode ? modelNode->getCachedModel() : nullptr;
+    // GLTF Cameras from model file (if UBO node provided and has cameras)
+    const CachedModel* cached = uboNode ? uboNode->getCachedModel() : nullptr;
     if (cached && !cached->cameras.empty()) {
-        // Auto-apply GLTF camera on first render after model load
-        if (modelNode->needsCameraApply && modelNode->selectedCameraIndex >= 0) {
-            camera->applyGLTFCamera(
-                cached->cameras[modelNode->selectedCameraIndex]
-            );
-            modelNode->needsCameraApply = false;
-        }
-
         if (ImGui::CollapsingHeader(
                 "GLTF Cameras", ImGuiTreeNodeFlags_DefaultOpen
             )) {
@@ -60,26 +52,26 @@ void CameraEditorUI::DrawOrbitalCamera(
             }
 
             // selectedCameraIndex: -1 = default, 0+ = GLTF camera index
-            int comboIndex = modelNode->selectedCameraIndex + 1;
+            int comboIndex = uboNode->selectedCameraIndex + 1;
             if (ImGui::Combo(
                     "Active Camera", &comboIndex, cameraNames.data(),
                     static_cast<int>(cameraNames.size())
                 )) {
-                modelNode->selectedCameraIndex = comboIndex - 1;
-                modelNode->updateCameraFromSelection();
+                uboNode->selectedCameraIndex = comboIndex - 1;
+                uboNode->updateCameraFromSelection();
 
                 // Auto-apply when selection changes
-                if (modelNode->selectedCameraIndex >= 0) {
+                if (uboNode->selectedCameraIndex >= 0) {
                     camera->applyGLTFCamera(
-                        cached->cameras[modelNode->selectedCameraIndex]
+                        cached->cameras[uboNode->selectedCameraIndex]
                     );
                 }
             }
 
             // Show selected camera info from GLTF file
-            if (modelNode->selectedCameraIndex >= 0) {
+            if (uboNode->selectedCameraIndex >= 0) {
                 const auto& cam =
-                    cached->cameras[modelNode->selectedCameraIndex];
+                    cached->cameras[uboNode->selectedCameraIndex];
                 ImGui::TextColored(
                     ImVec4(0.7f, 0.9f, 0.7f, 1.0f), "GLTF Camera: %s",
                     cam.name.c_str()
@@ -192,19 +184,11 @@ void CameraEditorUI::DrawOrbitalCamera(
 
 void CameraEditorUI::DrawFPSCamera(
     FPSCameraNode* camera,
-    ModelNode* modelNode
+    UBONode* uboNode
 ) {
-    // GLTF Cameras from model file (if model node provided and has cameras)
-    const CachedModel* cached = modelNode ? modelNode->getCachedModel() : nullptr;
+    // GLTF Cameras from model file (if UBO node provided and has cameras)
+    const CachedModel* cached = uboNode ? uboNode->getCachedModel() : nullptr;
     if (cached && !cached->cameras.empty()) {
-        // Auto-apply GLTF camera on first render after model load
-        if (modelNode->needsCameraApply && modelNode->selectedCameraIndex >= 0) {
-            camera->applyGLTFCamera(
-                cached->cameras[modelNode->selectedCameraIndex]
-            );
-            modelNode->needsCameraApply = false;
-        }
-
         if (ImGui::CollapsingHeader(
                 "GLTF Cameras", ImGuiTreeNodeFlags_DefaultOpen
             )) {
@@ -216,26 +200,26 @@ void CameraEditorUI::DrawFPSCamera(
             }
 
             // selectedCameraIndex: -1 = default, 0+ = GLTF camera index
-            int comboIndex = modelNode->selectedCameraIndex + 1;
+            int comboIndex = uboNode->selectedCameraIndex + 1;
             if (ImGui::Combo(
                     "Active Camera", &comboIndex, cameraNames.data(),
                     static_cast<int>(cameraNames.size())
                 )) {
-                modelNode->selectedCameraIndex = comboIndex - 1;
-                modelNode->updateCameraFromSelection();
+                uboNode->selectedCameraIndex = comboIndex - 1;
+                uboNode->updateCameraFromSelection();
 
                 // Auto-apply when selection changes
-                if (modelNode->selectedCameraIndex >= 0) {
+                if (uboNode->selectedCameraIndex >= 0) {
                     camera->applyGLTFCamera(
-                        cached->cameras[modelNode->selectedCameraIndex]
+                        cached->cameras[uboNode->selectedCameraIndex]
                     );
                 }
             }
 
             // Show selected camera info from GLTF file
-            if (modelNode->selectedCameraIndex >= 0) {
+            if (uboNode->selectedCameraIndex >= 0) {
                 const auto& cam =
-                    cached->cameras[modelNode->selectedCameraIndex];
+                    cached->cameras[uboNode->selectedCameraIndex];
                 ImGui::TextColored(
                     ImVec4(0.7f, 0.9f, 0.7f, 1.0f), "GLTF Camera: %s",
                     cam.name.c_str()
