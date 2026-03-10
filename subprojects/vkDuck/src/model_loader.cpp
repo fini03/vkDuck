@@ -273,9 +273,16 @@ void processNode(
                 tangentAccessor = &model.accessors[primitive.attributes.at("TANGENT")];
             }
 
+            bool hasColors = primitive.attributes.find("COLOR_0") != primitive.attributes.end();
+            const tinygltf::Accessor* colorAccessor = nullptr;
+            if (hasColors) {
+                colorAccessor = &model.accessors[primitive.attributes.at("COLOR_0")];
+            }
+
             const tinygltf::BufferView& posBufferView = model.bufferViews[posAccessor.bufferView];
             const tinygltf::BufferView* normalBufferView = nullptr;
             const tinygltf::BufferView* texCoordBufferView = nullptr;
+            const tinygltf::BufferView* colorBufferView = nullptr;
             const tinygltf::BufferView* tangentBufferView = nullptr;
 
             if (hasNormals) {
@@ -284,6 +291,9 @@ void processNode(
             if (hasTexCoords) {
                 texCoordBufferView = &model.bufferViews[texCoordAccessor->bufferView];
             }
+            if (hasColors) {
+                colorBufferView = &model.bufferViews[colorAccessor->bufferView];
+            }
             if (hasTangents) {
                 tangentBufferView = &model.bufferViews[tangentAccessor->bufferView];
             }
@@ -291,6 +301,7 @@ void processNode(
             const tinygltf::Buffer& posBuffer = model.buffers[posBufferView.buffer];
             const tinygltf::Buffer* normalBuffer = nullptr;
             const tinygltf::Buffer* texCoordBuffer = nullptr;
+            const tinygltf::Buffer* colorBuffer = nullptr;
             const tinygltf::Buffer* tangentBuffer = nullptr;
 
             if (hasNormals) {
@@ -298,6 +309,9 @@ void processNode(
             }
             if (hasTexCoords) {
                 texCoordBuffer = &model.buffers[texCoordBufferView->buffer];
+            }
+            if (hasColors) {
+                colorBuffer = &model.buffers[colorBufferView->buffer];
             }
             if (hasTangents) {
                 tangentBuffer = &model.buffers[tangentBufferView->buffer];
@@ -308,12 +322,16 @@ void processNode(
                 ? normalBufferView->byteStride : sizeof(float) * 3;
             size_t texCoordStride = (hasTexCoords && texCoordBufferView->byteStride)
                 ? texCoordBufferView->byteStride : sizeof(float) * 2;
+            // COLOR_0 can be VEC3 or VEC4, default to VEC4 stride
+            size_t colorStride = (hasColors && colorBufferView->byteStride)
+                ? colorBufferView->byteStride : sizeof(float) * 4;
             size_t tangentStride = (hasTangents && tangentBufferView->byteStride)
                 ? tangentBufferView->byteStride : sizeof(float) * 4;
 
             const uint8_t* posData = &posBuffer.data[posBufferView.byteOffset + posAccessor.byteOffset];
             const uint8_t* normalData = nullptr;
             const uint8_t* texCoordData = nullptr;
+            const uint8_t* colorData = nullptr;
             const uint8_t* tangentData = nullptr;
 
             if (hasNormals) {
@@ -321,6 +339,9 @@ void processNode(
             }
             if (hasTexCoords) {
                 texCoordData = &texCoordBuffer->data[texCoordBufferView->byteOffset + texCoordAccessor->byteOffset];
+            }
+            if (hasColors) {
+                colorData = &colorBuffer->data[colorBufferView->byteOffset + colorAccessor->byteOffset];
             }
             if (hasTangents) {
                 tangentData = &tangentBuffer->data[tangentBufferView->byteOffset + tangentAccessor->byteOffset];
@@ -351,6 +372,13 @@ void processNode(
                     vertex.texCoord = {tex[0], tex[1]};
                 } else {
                     vertex.texCoord = {0.0f, 0.0f};
+                }
+
+                if (hasColors) {
+                    const float* col = reinterpret_cast<const float*>(colorData + i * colorStride);
+                    vertex.color = {col[0], col[1], col[2]};
+                } else {
+                    vertex.color = {1.0f, 1.0f, 1.0f};  // Default white
                 }
 
                 if (hasTangents) {
@@ -684,6 +712,15 @@ ModelData loadModel(const std::string& path, const std::string& projectRoot) {
 
         // Normal texture
         matData.normalTextureIndex = getTextureIndex(mat.normalTexture.index);
+
+        // Debug: log material texture info
+        std::cout << "Material " << i << " '" << mat.name << "': "
+            << "baseColor=" << mat.pbrMetallicRoughness.baseColorTexture.index
+            << " emissive=" << mat.emissiveTexture.index
+            << " metRough=" << mat.pbrMetallicRoughness.metallicRoughnessTexture.index
+            << " normal=" << mat.normalTexture.index
+            << " emissiveFactor=(" << mat.emissiveFactor[0] << "," << mat.emissiveFactor[1] << "," << mat.emissiveFactor[2] << ")"
+            << std::endl;
 
         // Legacy: store base color path for backwards compatibility
         if (matData.baseColorTextureIndex >= 0) {

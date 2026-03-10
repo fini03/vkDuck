@@ -13,6 +13,7 @@ struct Vertex {
     glm::vec3 pos;
     glm::vec3 normal;
     glm::vec2 texCoord;
+    glm::vec3 color{1.0f, 1.0f, 1.0f};  // Vertex color (default white)
     glm::vec4 tangent;  // xyz = tangent direction, w = handedness for bitangent
 
     static VkVertexInputBindingDescription getBindingDescription() {
@@ -24,7 +25,7 @@ struct Vertex {
     }
 
     static std::vector<VkVertexInputAttributeDescription> getAttributeDescriptions() {
-        std::vector<VkVertexInputAttributeDescription> attributeDescriptions(4);
+        std::vector<VkVertexInputAttributeDescription> attributeDescriptions(5);
 
         attributeDescriptions[0].binding = 0;
         attributeDescriptions[0].location = 0;
@@ -43,15 +44,21 @@ struct Vertex {
 
         attributeDescriptions[3].binding = 0;
         attributeDescriptions[3].location = 3;
-        attributeDescriptions[3].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-        attributeDescriptions[3].offset = offsetof(Vertex, tangent);
+        attributeDescriptions[3].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributeDescriptions[3].offset = offsetof(Vertex, color);
+
+        attributeDescriptions[4].binding = 0;
+        attributeDescriptions[4].location = 4;
+        attributeDescriptions[4].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        attributeDescriptions[4].offset = offsetof(Vertex, tangent);
 
         return attributeDescriptions;
     }
 
     bool operator==(const Vertex& other) const {
         return pos == other.pos && normal == other.normal &&
-               texCoord == other.texCoord && tangent == other.tangent;
+               texCoord == other.texCoord && color == other.color &&
+               tangent == other.tangent;
     }
 };
 // }}}

@@ -7,15 +7,15 @@
  *
  * Output pins (each is an array of textures, one per geometry range):
  * - baseColorPin (Image) - Base color / albedo textures
- * - emissivePin (Image) - Emissive textures
  * - metallicRoughnessPin (Image) - Metallic-roughness packed textures
  * - normalPin (Image) - Normal map textures
+ * - emissivePin (Image) - Emissive textures
  *
- * Missing textures use generated default textures:
- * - baseColor: white (1,1,1,1)
- * - emissive: black (0,0,0,1)
- * - metallicRoughness: default values (metal=1, rough=1) as (255, 255, 0, 255)
- * - normal: flat normal (0.5, 0.5, 1.0) as (128, 128, 255, 255)
+ * Missing textures use generated 1x1 default textures:
+ * - baseColor: white (255,255,255)
+ * - metallicRoughness: project's default.png
+ * - normal: flat (128,128,255) -> points straight up in tangent space
+ * - emissive: black (0,0,0)
  */
 class MaterialNode : public ModelNodeBase {
 public:
@@ -44,14 +44,14 @@ public:
 
     // Output pins
     Pin baseColorPin;
-    Pin emissivePin;
     Pin metallicRoughnessPin;
     Pin normalPin;
+    Pin emissivePin;
 
     PinHandle baseColorPinHandle = INVALID_PIN_HANDLE;
-    PinHandle emissivePinHandle = INVALID_PIN_HANDLE;
     PinHandle metallicRoughnessPinHandle = INVALID_PIN_HANDLE;
     PinHandle normalPinHandle = INVALID_PIN_HANDLE;
+    PinHandle emissivePinHandle = INVALID_PIN_HANDLE;
 
 private:
     void createDefaultPins();
@@ -59,30 +59,26 @@ private:
 
     // Primitive handles for texture arrays
     primitives::StoreHandle baseColorArray_{};
-    primitives::StoreHandle emissiveArray_{};
     primitives::StoreHandle metallicRoughnessArray_{};
     primitives::StoreHandle normalArray_{};
+    primitives::StoreHandle emissiveArray_{};
 
-    // Default texture handles
-    primitives::StoreHandle defaultWhiteTexture_{};
-    primitives::StoreHandle defaultBlackTexture_{};
-    primitives::StoreHandle defaultNormalTexture_{};
-    primitives::StoreHandle defaultMetallicRoughnessTexture_{};
+    // Per-channel default texture handles
+    primitives::StoreHandle defaultWhiteTexture_{};      // Base color fallback
+    primitives::StoreHandle defaultNormalTexture_{};     // Normal map fallback
+    primitives::StoreHandle defaultProjectTexture_{};    // MetRough fallback (from default.png)
+    primitives::StoreHandle defaultBlackTexture_{};      // Emissive fallback
 
     // Default texture pixel data (persisted for GPU upload)
     std::vector<uint8_t> defaultWhitePixels_;
-    std::vector<uint8_t> defaultBlackPixels_;
     std::vector<uint8_t> defaultNormalPixels_;
-    std::vector<uint8_t> defaultMetallicRoughnessPixels_;
+    std::vector<uint8_t> defaultBlackPixels_;
 
     // Helper to create a 1x1 default texture
     primitives::StoreHandle createDefaultTexture(
         primitives::Store& store,
         std::vector<uint8_t>& pixelStorage,
-        uint8_t r,
-        uint8_t g,
-        uint8_t b,
-        uint8_t a
+        uint8_t r, uint8_t g, uint8_t b, uint8_t a
     );
 
     // Helper to create image primitive from EditorImage
