@@ -168,6 +168,7 @@ CameraData CameraController::getCameraData() const {
     data.view = getViewMatrix();
     data.invView = glm::inverse(data.view);
     data.proj = getProjectionMatrix();
+    data.invProj = glm::inverse(data.proj);
     return data;
 }
 
