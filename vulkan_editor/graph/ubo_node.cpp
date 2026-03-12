@@ -93,6 +93,23 @@ void UBONode::onModelSet() {
     }
 }
 
+std::vector<ed::PinId> UBONode::getPinsToUnlink() const {
+    std::vector<ed::PinId> pins;
+    const CachedModel* cached = getCachedModel();
+
+    // If no model or model has no cameras, the camera pin should be unlinked
+    if (!cached || cached->cameras.empty()) {
+        pins.push_back(cameraPin.id);
+    }
+
+    // If no model or model has no lights, the light pin should be unlinked
+    if (!cached || cached->lights.empty()) {
+        pins.push_back(lightPin.id);
+    }
+
+    return pins;
+}
+
 nlohmann::json UBONode::toJson() const {
     nlohmann::json j = ModelNodeBase::toJson();
     j["type"] = "ubo";

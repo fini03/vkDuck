@@ -80,6 +80,13 @@ Editor::Editor(
             ++totalAssigned;
         }
 
+        // Clean up stale links from UBO nodes whose camera/light pins are no longer valid
+        for (auto* node : uboNodes) {
+            for (auto pinId : node->getPinsToUnlink()) {
+                graph->removeLinksForPin(pinId);
+            }
+        }
+
         if (totalAssigned > 0) {
             Log::info("Editor", "Assigned model to {} model node(s)", totalAssigned);
         } else {

@@ -47,6 +47,9 @@ public:
     void updateCameraFromSelection();
     void updateLightsFromGLTF();
 
+    // Returns pins that should have their links removed (data no longer available)
+    std::vector<ax::NodeEditor::PinId> getPinsToUnlink() const;
+
     // Output pins
     Pin modelMatrixPin;
     Pin cameraPin;
