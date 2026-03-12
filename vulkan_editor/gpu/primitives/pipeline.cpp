@@ -554,7 +554,6 @@ bool RenderPass::create(
     clearValues.reserve(attachments.size() * 2);
     bool hasResolveAttachments = false;
 
-    uint32_t attachmentIndex = 0;
     for (StoreHandle hAttachment : attachments) {
         const Attachment& attachment =
             store.attachments[hAttachment.handle];
@@ -570,6 +569,9 @@ bool RenderPass::create(
             minHeight = imageExtent.height;
         if (imageExtent.width < minWidth)
             minWidth = imageExtent.width;
+
+        // Get current attachment index before adding
+        uint32_t attachmentIndex = static_cast<uint32_t>(attachmentDescs.size());
 
         attachmentDescs.push_back(attachment.desc);
         attachmentViews.push_back(backingImage.view);
@@ -636,8 +638,6 @@ bool RenderPass::create(
 
         if (isSampled)
             desc.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        attachmentIndex++;
     }
 
     VkSubpassDescription subpass{};

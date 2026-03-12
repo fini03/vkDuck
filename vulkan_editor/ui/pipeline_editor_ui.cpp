@@ -150,38 +150,37 @@ void PipelineEditorUI::DrawNodeSettings(ShaderManager* shaderManager) {
             selectedPipeline, graph, shaderManager
         );
     } else if (selectedVertexData) {
-        ImGui::TextWrapped("Vertex Data Node");
-        ImGui::Separator();
-        if (selectedVertexData->hasModel()) {
-            ImGui::Text("Model: %s", selectedVertexData->modelPath);
-        } else {
-            ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "No model loaded");
-            ImGui::TextWrapped("Select a model from the Asset Library.");
-        }
+        ModelSettingsUI::Draw(selectedVertexData);
     } else if (selectedUBO) {
-        ImGui::TextWrapped("UBO Node (Matrices/Camera/Light)");
-        ImGui::Separator();
-        if (selectedUBO->hasModel()) {
-            ImGui::Text("Model: %s", selectedUBO->modelPath);
-            // TODO: Add camera/light selection UI here
-        } else {
-            ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "No model loaded");
-            ImGui::TextWrapped("Select a model from the Asset Library.");
-        }
+        ModelSettingsUI::Draw(selectedUBO);
     } else if (selectedMaterial) {
-        ImGui::TextWrapped("Material Node (PBR Textures)");
-        ImGui::Separator();
-        if (selectedMaterial->hasModel()) {
-            ImGui::Text("Model: %s", selectedMaterial->modelPath);
-        } else {
-            ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "No model loaded");
-            ImGui::TextWrapped("Select a model from the Asset Library.");
-        }
+        ModelSettingsUI::Draw(selectedMaterial);
     } else if (selectedCamera) {
-        // GLTF camera dropdown disabled - use UBO node for GLTF cameras
-        CameraEditorUI::Draw(selectedCamera, &graph, nullptr);
+        // Find first UBO node with GLTF cameras for initialization
+        UBONode* uboWithCameras = nullptr;
+        for (const auto& node : graph.nodes) {
+            if (auto* ubo = dynamic_cast<UBONode*>(node.get())) {
+                const CachedModel* cached = ubo->getCachedModel();
+                if (cached && !cached->cameras.empty()) {
+                    uboWithCameras = ubo;
+                    break;
+                }
+            }
+        }
+        CameraEditorUI::Draw(selectedCamera, &graph, uboWithCameras);
     } else if (selectedLight) {
-        LightEditorUI::Draw(selectedLight);
+        // Find first UBO node with GLTF lights for initialization
+        UBONode* uboWithLights = nullptr;
+        for (const auto& node : graph.nodes) {
+            if (auto* ubo = dynamic_cast<UBONode*>(node.get())) {
+                const CachedModel* cached = ubo->getCachedModel();
+                if (cached && !cached->lights.empty()) {
+                    uboWithLights = ubo;
+                    break;
+                }
+            }
+        }
+        LightEditorUI::Draw(selectedLight, uboWithLights);
     } else if (selectedPresent) {
         ImGui::TextWrapped("Present Node - displays final output");
     } else {

@@ -128,7 +128,7 @@ void ModelSettingsUI::DrawUBOSettings(UBONode* node) {
     // GLTF Cameras dropdown
     if (!cached->cameras.empty()) {
         ImGui::Separator();
-        ImGui::Text("GLTF Cameras");
+        ImGui::Text("GLTF Cameras (%zu)", cached->cameras.size());
 
         // Build camera names for combo box
         std::vector<const char*> cameraNames;
@@ -183,7 +183,7 @@ void ModelSettingsUI::DrawUBOSettings(UBONode* node) {
     // GLTF Lights info
     if (!cached->lights.empty()) {
         ImGui::Separator();
-        ImGui::Text("GLTF Lights (%zu total)", cached->lights.size());
+        ImGui::Text("GLTF Lights (%zu)", cached->lights.size());
 
         // Build light names for combo box (for viewing details)
         std::vector<const char*> lightNames;
