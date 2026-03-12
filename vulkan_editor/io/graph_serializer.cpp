@@ -396,6 +396,8 @@ PipelineState::buildPinIdMap(NodeGraph& graph) const {
             pinIdMap[material->metallicRoughnessPin.id.Get()] =
                 &material->metallicRoughnessPin;
             pinIdMap[material->normalPin.id.Get()] = &material->normalPin;
+            pinIdMap[material->materialParamsPin.id.Get()] =
+                &material->materialParamsPin;
         } else if (auto* present =
                        dynamic_cast<PresentNode*>(node.get())) {
             pinIdMap[present->imagePin.id.Get()] = &present->imagePin;

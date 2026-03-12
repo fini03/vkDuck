@@ -713,13 +713,23 @@ ModelData loadModel(const std::string& path, const std::string& projectRoot) {
         // Normal texture
         matData.normalTextureIndex = getTextureIndex(mat.normalTexture.index);
 
-        // Debug: log material texture info
-        std::cout << "Material " << i << " '" << mat.name << "': "
-            << "baseColor=" << mat.pbrMetallicRoughness.baseColorTexture.index
-            << " emissive=" << mat.emissiveTexture.index
-            << " metRough=" << mat.pbrMetallicRoughness.metallicRoughnessTexture.index
-            << " normal=" << mat.normalTexture.index
-            << " emissiveFactor=(" << mat.emissiveFactor[0] << "," << mat.emissiveFactor[1] << "," << mat.emissiveFactor[2] << ")"
+        // Debug: log all PBR material values
+        std::cout << "Material " << i << " '" << mat.name << "':\n"
+            << "  Textures: baseColor=" << mat.pbrMetallicRoughness.baseColorTexture.index
+            << ", metRough=" << mat.pbrMetallicRoughness.metallicRoughnessTexture.index
+            << ", normal=" << mat.normalTexture.index
+            << ", emissive=" << mat.emissiveTexture.index << "\n"
+            << "  baseColorFactor: ["
+            << mat.pbrMetallicRoughness.baseColorFactor[0] << ", "
+            << mat.pbrMetallicRoughness.baseColorFactor[1] << ", "
+            << mat.pbrMetallicRoughness.baseColorFactor[2] << ", "
+            << mat.pbrMetallicRoughness.baseColorFactor[3] << "]\n"
+            << "  metallicFactor: " << mat.pbrMetallicRoughness.metallicFactor << "\n"
+            << "  roughnessFactor: " << mat.pbrMetallicRoughness.roughnessFactor << "\n"
+            << "  emissiveFactor: ["
+            << mat.emissiveFactor[0] << ", "
+            << mat.emissiveFactor[1] << ", "
+            << mat.emissiveFactor[2] << "]\n"
             << std::endl;
 
         // Legacy: store base color path for backwards compatibility

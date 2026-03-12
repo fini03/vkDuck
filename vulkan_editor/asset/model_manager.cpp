@@ -298,7 +298,7 @@ bool ModelManager::loadModelInternal(CachedModel& model) {
         }
     }
 
-    // Set up materials with all PBR texture indices
+    // Set up materials with all PBR texture indices and factors
     model.materials.resize(libModelData.materials.size());
     for (size_t i = 0; i < libModelData.materials.size(); ++i) {
         const auto& srcMat = libModelData.materials[i];
@@ -307,6 +307,10 @@ bool ModelManager::loadModelInternal(CachedModel& model) {
         dstMat.emissiveTextureIndex = srcMat.emissiveTextureIndex;
         dstMat.metallicRoughnessTextureIndex = srcMat.metallicRoughnessTextureIndex;
         dstMat.normalTextureIndex = srcMat.normalTextureIndex;
+        dstMat.baseColorFactor = srcMat.baseColorFactor;
+        dstMat.emissiveFactor = srcMat.emissiveFactor;
+        dstMat.metallicFactor = srcMat.metallicFactor;
+        dstMat.roughnessFactor = srcMat.roughnessFactor;
     }
 
     // Load textures in parallel

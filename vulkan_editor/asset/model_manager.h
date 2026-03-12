@@ -33,6 +33,24 @@ struct EditorMaterial {
     int emissiveTextureIndex{-1};
     int metallicRoughnessTextureIndex{-1};
     int normalTextureIndex{-1};
+
+    // PBR factors (used when texture is missing or as multipliers)
+    glm::vec4 baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};
+    glm::vec3 emissiveFactor{0.0f, 0.0f, 0.0f};
+    float metallicFactor{1.0f};
+    float roughnessFactor{1.0f};
+};
+
+/**
+ * @brief GPU-ready material parameters for PBR shading.
+ * Matches the expected layout in shaders (std140/std430).
+ */
+struct alignas(16) MaterialParams {
+    glm::vec4 baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};  // rgb = color, a = alpha
+    glm::vec4 emissiveFactor{0.0f, 0.0f, 0.0f, 1.0f};   // rgb = emissive, a = unused
+    float metallicFactor{1.0f};
+    float roughnessFactor{1.0f};
+    float _padding[2]{0.0f, 0.0f};
 };
 
 struct EditorGeometryRange {

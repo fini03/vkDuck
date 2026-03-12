@@ -75,6 +75,8 @@ PinLookupResult NodeGraph::findPin(ax::NodeEditor::PinId id) {
                 return {material, &material->metallicRoughnessPin, NodePinKind::Output};
             if (material->normalPin.id == id)
                 return {material, &material->normalPin, NodePinKind::Output};
+            if (material->materialParamsPin.id == id)
+                return {material, &material->materialParamsPin, NodePinKind::Output};
         }
 
         // --- Handle all Camera types (Orbital, Fixed) ---
@@ -180,6 +182,7 @@ void NodeGraph::removeNode(ed::NodeId nodeId) {
         pinsToRemove.insert(material->emissivePin.id);
         pinsToRemove.insert(material->metallicRoughnessPin.id);
         pinsToRemove.insert(material->normalPin.id);
+        pinsToRemove.insert(material->materialParamsPin.id);
     } else if (auto* camera =
                    dynamic_cast<CameraNodeBase*>(nodeToRemove)) {
         pinsToRemove.insert(camera->cameraPin.id);
@@ -265,6 +268,7 @@ void NodeGraph::buildDependencies() {
             pinInfo[material->emissivePin.id] = node;
             pinInfo[material->metallicRoughnessPin.id] = node;
             pinInfo[material->normalPin.id] = node;
+            pinInfo[material->materialParamsPin.id] = node;
         } else if (auto* camera = dynamic_cast<CameraNodeBase*>(node)) {
             pinInfo[camera->cameraPin.id] = node;
         } else if (auto* light = dynamic_cast<LightNode*>(node)) {

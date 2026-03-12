@@ -340,6 +340,7 @@ void UBONode::updateCameraFromSelection() {
         cameraData.view = glm::mat4(1.0f);
         cameraData.invView = glm::mat4(1.0f);
         cameraData.proj = glm::mat4(1.0f);
+        cameraData.invProj = glm::mat4(1.0f);
         return;
     }
 
@@ -377,6 +378,7 @@ void UBONode::updateCameraFromSelection() {
 
     // Flip Y for Vulkan
     cameraData.proj[1][1] *= -1;
+    cameraData.invProj = glm::inverse(cameraData.proj);
 
     Log::debug(
         LOG_CATEGORY,

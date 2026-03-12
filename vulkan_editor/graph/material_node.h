@@ -3,18 +3,19 @@
 
 /**
  * @class MaterialNode
- * @brief Outputs PBR texture arrays from a model.
+ * @brief Outputs PBR texture arrays and material parameters from a model.
  *
- * Output pins (each is an array of textures, one per geometry range):
- * - baseColorPin (Image) - Base color / albedo textures
- * - metallicRoughnessPin (Image) - Metallic-roughness packed textures
- * - normalPin (Image) - Normal map textures
- * - emissivePin (Image) - Emissive textures
+ * Output pins (each array has one element per geometry range):
+ * - baseColorPin (Image[]) - Base color / albedo textures
+ * - metallicRoughnessPin (Image[]) - Metallic-roughness packed textures (G=rough, B=metal)
+ * - normalPin (Image[]) - Normal map textures
+ * - emissivePin (Image[]) - Emissive textures
+ * - materialParamsPin (UBO[]) - PBR factors per geometry (MaterialParams struct)
  *
- * Missing textures use generated 1x1 default textures:
- * - baseColor: white (255,255,255)
- * - metallicRoughness: project's default.png
- * - normal: flat (128,128,255) -> points straight up in tangent space
+ * Default textures for missing materials (glTF PBR compliant):
+ * - baseColor: white (1,1,1,1)
+ * - metallicRoughness: (0, 1, 0) -> metallic=0 (dielectric), roughness=1 (fully rough)
+ * - normal: flat (0.5, 0.5, 1) -> points straight up in tangent space
  * - emissive: black (0,0,0)
  */
 class MaterialNode : public ModelNodeBase {
@@ -47,43 +48,54 @@ public:
     Pin metallicRoughnessPin;
     Pin normalPin;
     Pin emissivePin;
+    Pin materialParamsPin;
 
     PinHandle baseColorPinHandle = INVALID_PIN_HANDLE;
     PinHandle metallicRoughnessPinHandle = INVALID_PIN_HANDLE;
     PinHandle normalPinHandle = INVALID_PIN_HANDLE;
     PinHandle emissivePinHandle = INVALID_PIN_HANDLE;
+    PinHandle materialParamsPinHandle = INVALID_PIN_HANDLE;
 
 private:
     void createDefaultPins();
     bool usesRegistry_ = false;
 
-    // Primitive handles for texture arrays
+    // Texture array handles (one texture per geometry range)
     primitives::StoreHandle baseColorArray_{};
     primitives::StoreHandle metallicRoughnessArray_{};
     primitives::StoreHandle normalArray_{};
     primitives::StoreHandle emissiveArray_{};
+    primitives::StoreHandle materialParamsArray_{};
 
-    // Per-channel default texture handles
-    primitives::StoreHandle defaultWhiteTexture_{};      // Base color fallback
-    primitives::StoreHandle defaultNormalTexture_{};     // Normal map fallback
-    primitives::StoreHandle defaultProjectTexture_{};    // MetRough fallback (from default.png)
-    primitives::StoreHandle defaultBlackTexture_{};      // Emissive fallback
+    // Default texture handles (1x1 fallbacks)
+    primitives::StoreHandle defaultWhite_{};           // baseColor fallback
+    primitives::StoreHandle defaultMetallicRough_{};   // metallic=0, roughness=1
+    primitives::StoreHandle defaultNormal_{};          // flat normal (0.5, 0.5, 1)
+    primitives::StoreHandle defaultBlack_{};           // emissive fallback
 
-    // Default texture pixel data (persisted for GPU upload)
+    // Pixel storage for default textures (persisted for GPU upload)
     std::vector<uint8_t> defaultWhitePixels_;
+    std::vector<uint8_t> defaultMetallicRoughPixels_;
     std::vector<uint8_t> defaultNormalPixels_;
     std::vector<uint8_t> defaultBlackPixels_;
 
-    // Helper to create a 1x1 default texture
+    // MaterialParams data per geometry range (persisted for GPU upload)
+    std::vector<MaterialParams> materialParamsData_;
+
+    // Create a 1x1 default texture with given RGBA values
+    // linear=true for normal/metallic-roughness (UNORM), false for color data (SRGB)
     primitives::StoreHandle createDefaultTexture(
         primitives::Store& store,
         std::vector<uint8_t>& pixelStorage,
-        uint8_t r, uint8_t g, uint8_t b, uint8_t a
+        uint8_t r, uint8_t g, uint8_t b, uint8_t a,
+        bool linear
     );
 
-    // Helper to create image primitive from EditorImage
+    // Create image primitive from loaded texture
+    // linear=true for normal/metallic-roughness (UNORM), false for color data (SRGB)
     primitives::StoreHandle createImagePrimitive(
         primitives::Store& store,
-        const EditorImage& image
+        const EditorImage& image,
+        bool linear
     );
 };
