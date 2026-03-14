@@ -1,9 +1,13 @@
 #pragma once
-#include "multi_model_node_base.h"
+#include "multi_model_consumer_base.h"
+#include "vulkan_editor/io/serialization.h"
 
 /**
  * @class MultiMaterialNode
- * @brief Outputs combined PBR texture arrays and material parameters from multiple models.
+ * @brief Consumer node that outputs combined PBR texture arrays from a model source.
+ *
+ * Connects to a MultiModelSourceNode via input pin and creates PBR material
+ * primitives from the consolidated material data.
  *
  * Output pins (each array has one element per consolidated geometry range):
  * - baseColorPin (Image[]) - Base color / albedo textures
@@ -12,15 +16,13 @@
  * - emissivePin (Image[]) - Emissive textures
  * - materialParamsPin (UBO[]) - PBR factors per geometry (MaterialParams struct)
  *
- * Materials from all enabled models are merged with properly remapped texture indices.
- *
  * Default textures for missing materials (glTF PBR compliant):
  * - baseColor: white (1,1,1,1)
  * - metallicRoughness: (0, 1, 0) -> metallic=0 (dielectric), roughness=1 (fully rough)
  * - normal: flat (0.5, 0.5, 1) -> points straight up in tangent space
  * - emissive: black (0,0,0)
  */
-class MultiMaterialNode : public MultiModelNodeBase {
+class MultiMaterialNode : public MultiModelConsumerBase, public ISerializable {
 public:
     MultiMaterialNode();
     explicit MultiMaterialNode(int id);
@@ -45,6 +47,9 @@ public:
             outputs
     ) const override;
 
+    // Store graph reference for accessing source node during createPrimitives
+    void setGraph(NodeGraph* graph) { graph_ = graph; }
+
     // Output pins
     Pin baseColorPin;
     Pin metallicRoughnessPin;
@@ -60,7 +65,7 @@ public:
 
 private:
     void createDefaultPins();
-    bool usesRegistry_ = false;
+    NodeGraph* graph_ = nullptr;
 
     // Texture array handles (one texture per geometry range)
     primitives::StoreHandle baseColorArray_{};

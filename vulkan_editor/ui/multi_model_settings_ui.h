@@ -2,7 +2,7 @@
 #include <imgui.h>
 #include <filesystem>
 
-class MultiModelNodeBase;
+class MultiModelSourceNode;
 class MultiVertexDataNode;
 class MultiUBONode;
 class MultiMaterialNode;
@@ -12,19 +12,43 @@ class NodeGraph;
 /// UI helper for editing multi-model node settings
 class MultiModelSettingsUI {
 public:
-    // Draw settings for any multi-model node (dispatches based on type)
+    // Draw settings for source node (model list management)
     static void Draw(
-        MultiModelNodeBase* node,
+        MultiModelSourceNode* node,
+        ShaderManager* shaderManager = nullptr,
+        NodeGraph* graph = nullptr
+    );
+
+    // Draw settings for consumer nodes (connection status + node-specific)
+    static void Draw(
+        MultiVertexDataNode* node,
+        ShaderManager* shaderManager = nullptr,
+        NodeGraph* graph = nullptr
+    );
+    static void Draw(
+        MultiUBONode* node,
+        ShaderManager* shaderManager = nullptr,
+        NodeGraph* graph = nullptr
+    );
+    static void Draw(
+        MultiMaterialNode* node,
         ShaderManager* shaderManager = nullptr,
         NodeGraph* graph = nullptr
     );
 
 private:
-    // Common model list management (shared by all multi-model node types)
-    static void DrawModelList(MultiModelNodeBase* node);
+    // Model list management for source node
+    static void DrawModelList(MultiModelSourceNode* node);
 
-    // Specific UI for each node type
-    static void DrawMultiVertexDataSettings(MultiVertexDataNode* node);
-    static void DrawMultiUBOSettings(MultiUBONode* node);
-    static void DrawMultiMaterialSettings(MultiMaterialNode* node);
+    // Connection status for consumer nodes
+    static void DrawConnectionStatus(
+        const char* nodeType,
+        bool hasValidSource,
+        const char* sourceName
+    );
+
+    // Specific UI for each consumer type
+    static void DrawMultiVertexDataSettings(MultiVertexDataNode* node, NodeGraph* graph);
+    static void DrawMultiUBOSettings(MultiUBONode* node, NodeGraph* graph);
+    static void DrawMultiMaterialSettings(MultiMaterialNode* node, NodeGraph* graph);
 };

@@ -13,6 +13,7 @@ class PipelineNode;
 class VertexDataNode;
 class UBONode;
 class MaterialNode;
+class MultiModelSourceNode;
 class MultiVertexDataNode;
 class MultiUBONode;
 class MultiMaterialNode;
@@ -91,6 +92,7 @@ private:
     VertexDataNode* selectedVertexData = nullptr;
     UBONode* selectedUBO = nullptr;
     MaterialNode* selectedMaterial = nullptr;
+    MultiModelSourceNode* selectedMultiModelSource = nullptr;
     MultiVertexDataNode* selectedMultiVertexData = nullptr;
     MultiUBONode* selectedMultiUBO = nullptr;
     MultiMaterialNode* selectedMultiMaterial = nullptr;
@@ -133,9 +135,15 @@ public:
     /**
      * @brief Get the currently selected multi-model nodes (if any).
      */
+    MultiModelSourceNode* getSelectedMultiModelSourceNode() const { return selectedMultiModelSource; }
     MultiVertexDataNode* getSelectedMultiVertexDataNode() const { return selectedMultiVertexData; }
     MultiUBONode* getSelectedMultiUBONode() const { return selectedMultiUBO; }
     MultiMaterialNode* getSelectedMultiMaterialNode() const { return selectedMultiMaterial; }
+
+    /**
+     * @brief Get ALL multi-model source nodes in the graph.
+     */
+    std::vector<MultiModelSourceNode*> getAllMultiModelSourceNodes() const;
 
     void* m_HeaderBackground = nullptr;
 };

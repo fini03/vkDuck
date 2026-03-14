@@ -11,9 +11,8 @@
 #include "graph/node_graph.h"
 #include "graph/ubo_node.h"
 #include "graph/vertex_data_node.h"
-#include "graph/multi_vertex_data_node.h"
+#include "graph/multi_model_source_node.h"
 #include "graph/multi_ubo_node.h"
-#include "graph/multi_material_node.h"
 #include "shader/shader_manager.h"
 #include "asset/asset_library_ui.h"
 #include "ui/camera_editor_ui.h"
@@ -68,10 +67,8 @@ Editor::Editor(
         auto uboNodes = pipelineEditor->getAllUBONodes();
         auto materialNodes = pipelineEditor->getAllMaterialNodes();
 
-        // Get all multi-model nodes
-        auto multiVertexDataNodes = pipelineEditor->getAllMultiVertexDataNodes();
-        auto multiUBONodes = pipelineEditor->getAllMultiUBONodes();
-        auto multiMaterialNodes = pipelineEditor->getAllMultiMaterialNodes();
+        // Get all multi-model source nodes (consumers get data from sources)
+        auto multiModelSourceNodes = pipelineEditor->getAllMultiModelSourceNodes();
 
         size_t totalAssigned = 0;
         size_t totalAdded = 0;
@@ -90,16 +87,8 @@ Editor::Editor(
             ++totalAssigned;
         }
 
-        // Add to multi-model nodes (adds to list)
-        for (auto* node : multiVertexDataNodes) {
-            node->addModel(handle);
-            ++totalAdded;
-        }
-        for (auto* node : multiUBONodes) {
-            node->addModel(handle);
-            ++totalAdded;
-        }
-        for (auto* node : multiMaterialNodes) {
+        // Add to multi-model source nodes (consumers read from source)
+        for (auto* node : multiModelSourceNodes) {
             node->addModel(handle);
             ++totalAdded;
         }
@@ -134,6 +123,16 @@ void Editor::rebuildLiveViewPrimitives() {
         auto& store = liveView.getStore();
         graph->buildDependencies();
         auto sortedNodes = graph->topologicalSort();
+
+        // Clean up stale links from MultiUBONodes whose camera/light pins are no longer valid
+        // This happens when a model with lights/cameras is removed from the source
+        for (auto node : sortedNodes) {
+            if (auto* multiUbo = dynamic_cast<MultiUBONode*>(node)) {
+                for (auto pinId : multiUbo->getPinsToUnlink()) {
+                    graph->removeLinksForPin(pinId);
+                }
+            }
+        }
 
         for (auto node : sortedNodes) {
             auto* pipeline = dynamic_cast<PipelineNode*>(node);
@@ -179,6 +178,10 @@ void Editor::rebuildLiveViewPrimitives() {
 
             if (itOutput == outputMap.end()) {
                 auto pinInfo = graph->findPin(link.startPin);
+                // ModelSource pins are structural connections, not primitive data flows
+                if (pinInfo.pin && pinInfo.pin->type == PinType::ModelSource) {
+                    continue;
+                }
                 if (pinInfo.pin && pinInfo.node) {
                     Log::warning(
                         "LiveView",
@@ -197,6 +200,10 @@ void Editor::rebuildLiveViewPrimitives() {
 
             if (itInput == inputMap.end()) {
                 auto pinInfo = graph->findPin(link.endPin);
+                // ModelSource pins are structural connections, not primitive data flows
+                if (pinInfo.pin && pinInfo.pin->type == PinType::ModelSource) {
+                    continue;
+                }
                 if (pinInfo.pin && pinInfo.node) {
                     Log::warning(
                         "LiveView",

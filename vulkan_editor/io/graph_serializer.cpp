@@ -10,7 +10,8 @@
 #include "../graph/present_node.h"
 #include "../graph/ubo_node.h"
 #include "../graph/vertex_data_node.h"
-#include "../graph/multi_model_node_base.h"
+#include "../graph/multi_model_source_node.h"
+#include "../graph/multi_model_consumer_base.h"
 #include "../graph/multi_vertex_data_node.h"
 #include "../graph/multi_ubo_node.h"
 #include "../graph/multi_material_node.h"
@@ -344,100 +345,50 @@ std::unique_ptr<Node> NodeFactory::createFromJson(
         lightNode->fromJson(jNode);
         node = std::move(lightNode);
 
-    } else if (type == "multi_vertex_data") {
-        auto multiVertexNode = std::make_unique<MultiVertexDataNode>(id);
-        multiVertexNode->fromJson(jNode);
+    } else if (type == "multi_model_source") {
+        auto sourceNode = std::make_unique<MultiModelSourceNode>(id);
+        sourceNode->fromJson(jNode);
 
         // Load all models via ModelManager
-        // Collect entries first, then clear and re-add with loaded handles
         namespace fs = std::filesystem;
         std::vector<std::pair<std::string, bool>> entriesToLoad;
-        for (size_t i = 0; i < multiVertexNode->getModelCount(); ++i) {
-            const ModelEntry& entry = multiVertexNode->getModel(i);
+        for (size_t i = 0; i < sourceNode->getModelCount(); ++i) {
+            const ModelEntry& entry = sourceNode->getModel(i);
             if (entry.path[0] != '\0') {
                 entriesToLoad.emplace_back(entry.path, entry.enabled);
             }
         }
-        // Clear all placeholder entries
-        while (multiVertexNode->getModelCount() > 0) {
-            multiVertexNode->removeModel(0);
+        // Clear placeholder entries and re-add with loaded handles
+        while (sourceNode->getModelCount() > 0) {
+            sourceNode->removeModel(0);
         }
-        // Load and add models
         for (const auto& [path, enabled] : entriesToLoad) {
             ModelHandle handle = g_modelManager->loadModel(fs::path(path));
             if (g_modelManager->isLoaded(handle)) {
-                multiVertexNode->addModel(handle);
-                multiVertexNode->setModelEnabled(
-                    multiVertexNode->getModelCount() - 1, enabled);
+                sourceNode->addModel(handle);
+                sourceNode->setModelEnabled(
+                    sourceNode->getModelCount() - 1, enabled);
             }
         }
 
+        node = std::move(sourceNode);
+
+    } else if (type == "multi_vertex_data") {
+        // Consumer node - gets data from connected source, no model list
+        auto multiVertexNode = std::make_unique<MultiVertexDataNode>(id);
+        multiVertexNode->fromJson(jNode);
         node = std::move(multiVertexNode);
 
     } else if (type == "multi_ubo") {
+        // Consumer node - gets data from connected source, no model list
         auto multiUboNode = std::make_unique<MultiUBONode>(id);
         multiUboNode->fromJson(jNode);
-
-        // Store camera selection
-        int savedCameraIndex = multiUboNode->selectedCameraIndex;
-
-        // Load all models via ModelManager
-        // Collect entries first, then clear and re-add with loaded handles
-        namespace fs = std::filesystem;
-        std::vector<std::pair<std::string, bool>> entriesToLoad;
-        for (size_t i = 0; i < multiUboNode->getModelCount(); ++i) {
-            const ModelEntry& entry = multiUboNode->getModel(i);
-            if (entry.path[0] != '\0') {
-                entriesToLoad.emplace_back(entry.path, entry.enabled);
-            }
-        }
-        // Clear all placeholder entries
-        while (multiUboNode->getModelCount() > 0) {
-            multiUboNode->removeModel(0);
-        }
-        // Load and add models
-        for (const auto& [path, enabled] : entriesToLoad) {
-            ModelHandle handle = g_modelManager->loadModel(fs::path(path));
-            if (g_modelManager->isLoaded(handle)) {
-                multiUboNode->addModel(handle);
-                multiUboNode->setModelEnabled(
-                    multiUboNode->getModelCount() - 1, enabled);
-            }
-        }
-
-        // Restore selection
-        multiUboNode->selectedCameraIndex = savedCameraIndex;
-
         node = std::move(multiUboNode);
 
     } else if (type == "multi_material") {
+        // Consumer node - gets data from connected source, no model list
         auto multiMaterialNode = std::make_unique<MultiMaterialNode>(id);
         multiMaterialNode->fromJson(jNode);
-
-        // Load all models via ModelManager
-        // Collect entries first, then clear and re-add with loaded handles
-        namespace fs = std::filesystem;
-        std::vector<std::pair<std::string, bool>> entriesToLoad;
-        for (size_t i = 0; i < multiMaterialNode->getModelCount(); ++i) {
-            const ModelEntry& entry = multiMaterialNode->getModel(i);
-            if (entry.path[0] != '\0') {
-                entriesToLoad.emplace_back(entry.path, entry.enabled);
-            }
-        }
-        // Clear all placeholder entries
-        while (multiMaterialNode->getModelCount() > 0) {
-            multiMaterialNode->removeModel(0);
-        }
-        // Load and add models
-        for (const auto& [path, enabled] : entriesToLoad) {
-            ModelHandle handle = g_modelManager->loadModel(fs::path(path));
-            if (g_modelManager->isLoaded(handle)) {
-                multiMaterialNode->addModel(handle);
-                multiMaterialNode->setModelEnabled(
-                    multiMaterialNode->getModelCount() - 1, enabled);
-            }
-        }
-
         node = std::move(multiMaterialNode);
 
     } else {
@@ -507,6 +458,38 @@ PipelineState::buildPinIdMap(NodeGraph& graph) const {
         } else if (auto* light = dynamic_cast<LightNode*>(node.get())) {
             pinIdMap[light->lightArrayPin.id.Get()] =
                 &light->lightArrayPin;
+        } else if (auto* source =
+                       dynamic_cast<MultiModelSourceNode*>(node.get())) {
+            pinIdMap[source->modelSourcePin.id.Get()] =
+                &source->modelSourcePin;
+        } else if (auto* multiVertex =
+                       dynamic_cast<MultiVertexDataNode*>(node.get())) {
+            pinIdMap[multiVertex->sourceInputPin.id.Get()] =
+                &multiVertex->sourceInputPin;
+            pinIdMap[multiVertex->vertexDataPin.id.Get()] =
+                &multiVertex->vertexDataPin;
+        } else if (auto* multiUbo =
+                       dynamic_cast<MultiUBONode*>(node.get())) {
+            pinIdMap[multiUbo->sourceInputPin.id.Get()] =
+                &multiUbo->sourceInputPin;
+            pinIdMap[multiUbo->modelMatrixPin.id.Get()] =
+                &multiUbo->modelMatrixPin;
+            pinIdMap[multiUbo->cameraPin.id.Get()] = &multiUbo->cameraPin;
+            pinIdMap[multiUbo->lightPin.id.Get()] = &multiUbo->lightPin;
+        } else if (auto* multiMaterial =
+                       dynamic_cast<MultiMaterialNode*>(node.get())) {
+            pinIdMap[multiMaterial->sourceInputPin.id.Get()] =
+                &multiMaterial->sourceInputPin;
+            pinIdMap[multiMaterial->baseColorPin.id.Get()] =
+                &multiMaterial->baseColorPin;
+            pinIdMap[multiMaterial->emissivePin.id.Get()] =
+                &multiMaterial->emissivePin;
+            pinIdMap[multiMaterial->metallicRoughnessPin.id.Get()] =
+                &multiMaterial->metallicRoughnessPin;
+            pinIdMap[multiMaterial->normalPin.id.Get()] =
+                &multiMaterial->normalPin;
+            pinIdMap[multiMaterial->materialParamsPin.id.Get()] =
+                &multiMaterial->materialParamsPin;
         }
     }
 

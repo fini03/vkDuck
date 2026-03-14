@@ -16,13 +16,13 @@ constexpr const char* LOG_CATEGORY = "MultiVertexDataNode";
 namespace ed = ax::NodeEditor;
 
 MultiVertexDataNode::MultiVertexDataNode()
-    : MultiModelNodeBase() {
+    : MultiModelConsumerBase() {
     name = "Multi Vertex Data";
     createDefaultPins();
 }
 
 MultiVertexDataNode::MultiVertexDataNode(int id)
-    : MultiModelNodeBase(id) {
+    : MultiModelConsumerBase(id) {
     name = "Multi Vertex Data";
     createDefaultPins();
 }
@@ -36,6 +36,10 @@ void MultiVertexDataNode::createDefaultPins() {
 }
 
 void MultiVertexDataNode::registerPins(PinRegistry& registry) {
+    // Register source input pin from base class
+    registerSourceInputPin(registry);
+
+    // Register output pin
     vertexDataPinHandle = registry.registerPinWithId(
         id,
         vertexDataPin.id,
@@ -43,13 +47,19 @@ void MultiVertexDataNode::registerPins(PinRegistry& registry) {
         PinKind::Output,
         vertexDataPin.label
     );
-    usesRegistry_ = true;
 }
 
 nlohmann::json MultiVertexDataNode::toJson() const {
-    nlohmann::json j = MultiModelNodeBase::toJson();
+    nlohmann::json j;
     j["type"] = "multi_vertex_data";
+    j["id"] = id;
+    j["name"] = name;
+    j["position"] = {Node::position.x, Node::position.y};
 
+    // Serialize input pin (source connection)
+    sourceInputPinToJson(j);
+
+    // Serialize output pin
     j["outputPins"] = nlohmann::json::array();
     j["outputPins"].push_back({
         {"id", vertexDataPin.id.Get()},
@@ -61,8 +71,17 @@ nlohmann::json MultiVertexDataNode::toJson() const {
 }
 
 void MultiVertexDataNode::fromJson(const nlohmann::json& j) {
-    MultiModelNodeBase::fromJson(j);
+    name = j.value("name", "Multi Vertex Data");
+    if (j.contains("position") && j["position"].is_array() &&
+        j["position"].size() == 2) {
+        Node::position =
+            ImVec2(j["position"][0].get<float>(), j["position"][1].get<float>());
+    }
 
+    // Restore input pin
+    sourceInputPinFromJson(j);
+
+    // Restore output pin
     if (j.contains("outputPins") && j["outputPins"].is_array()) {
         auto& pins = j["outputPins"];
         if (pins.size() > 0) {
@@ -75,10 +94,20 @@ void MultiVertexDataNode::render(
     ax::NodeEditor::Utilities::BlueprintNodeBuilder& builder,
     const NodeGraph& nodeGraph
 ) const {
-    std::vector<std::string> pinLabels = {vertexDataPin.label};
-    float nodeWidth = calculateMultiModelNodeWidth(name, pinLabels);
+    std::vector<std::string> pinLabels = {sourceInputPin.label, vertexDataPin.label};
+    float nodeWidth = calculateConsumerNodeWidth(name, pinLabels);
 
-    renderMultiModelNodeHeader(builder, nodeWidth);
+    renderConsumerNodeHeader(builder, nodeWidth);
+
+    // Draw input pin (source connection)
+    DrawInputPin(
+        sourceInputPin.id,
+        sourceInputPin.label,
+        static_cast<int>(sourceInputPin.type),
+        nodeGraph.isPinLinked(sourceInputPin.id),
+        nodeWidth,
+        builder
+    );
 
     // Draw output pin
     DrawOutputPin(
@@ -99,12 +128,23 @@ void MultiVertexDataNode::clearPrimitives() {
 }
 
 void MultiVertexDataNode::createPrimitives(primitives::Store& store) {
-    const auto& ranges = getConsolidatedRanges();
-    const auto& vertices = getConsolidatedVertices();
-    const auto& indices = getConsolidatedIndices();
+    if (!graph_) {
+        Log::warning(LOG_CATEGORY, "Cannot create primitives: no graph reference");
+        return;
+    }
+
+    MultiModelSourceNode* source = findSourceNode(*graph_);
+    if (!source) {
+        Log::warning(LOG_CATEGORY, "Cannot create primitives: not connected to source");
+        return;
+    }
+
+    const auto& ranges = source->getConsolidatedRanges();
+    const auto& vertices = source->getConsolidatedVertices();
+    const auto& indices = source->getConsolidatedIndices();
 
     if (ranges.empty()) {
-        Log::warning(LOG_CATEGORY, "Cannot create primitives: no models loaded");
+        Log::warning(LOG_CATEGORY, "Cannot create primitives: no models loaded in source");
         return;
     }
 
@@ -143,10 +183,8 @@ void MultiVertexDataNode::createPrimitives(primitives::Store& store) {
         vertexData.bindingDescription = Vertex::getBindingDescription();
         vertexData.attributeDescriptions = Vertex::getAttributeDescriptions();
 
-        // Use first model's path for file reference
-        if (!models_.empty()) {
-            vertexData.modelFilePath = models_[0].path;
-        }
+        // Use source node name for file reference
+        vertexData.modelFilePath = source->name;
         vertexData.geometryIndex = static_cast<uint32_t>(i);
 
         vertexArray.handles[i] = hVertexData.handle;
@@ -162,9 +200,8 @@ void MultiVertexDataNode::createPrimitives(primitives::Store& store) {
 
     Log::info(
         LOG_CATEGORY,
-        "Created {} VertexData primitives from {} models",
-        ranges.size(),
-        models_.size()
+        "Created {} VertexData primitives from source",
+        ranges.size()
     );
 }
 

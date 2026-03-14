@@ -1,4 +1,4 @@
-#include "multi_model_node_base.h"
+#include "multi_model_source_node.h"
 #include "node_graph.h"
 #include "vulkan_editor/util/logger.h"
 #include <cstring>
@@ -9,20 +9,24 @@
 
 namespace {
 constexpr float PADDING_X = 10.0f;
-constexpr const char* LOG_CATEGORY = "MultiModelNodeBase";
+constexpr const char* LOG_CATEGORY = "MultiModelSourceNode";
 } // namespace
 
 namespace ed = ax::NodeEditor;
 
-MultiModelNodeBase::MultiModelNodeBase()
+MultiModelSourceNode::MultiModelSourceNode()
     : Node() {
+    name = "Model Source";
+    createDefaultPins();
 }
 
-MultiModelNodeBase::MultiModelNodeBase(int id)
+MultiModelSourceNode::MultiModelSourceNode(int id)
     : Node(id) {
+    name = "Model Source";
+    createDefaultPins();
 }
 
-MultiModelNodeBase::~MultiModelNodeBase() {
+MultiModelSourceNode::~MultiModelSourceNode() {
     // Release references to all cached models
     if (g_modelManager) {
         for (auto& entry : models_) {
@@ -33,7 +37,24 @@ MultiModelNodeBase::~MultiModelNodeBase() {
     }
 }
 
-void MultiModelNodeBase::addModel(ModelHandle handle) {
+void MultiModelSourceNode::createDefaultPins() {
+    modelSourcePin.id = ed::PinId(GetNextGlobalId());
+    modelSourcePin.type = PinType::ModelSource;
+    modelSourcePin.label = "Models";
+}
+
+void MultiModelSourceNode::registerPins(PinRegistry& registry) {
+    modelSourcePinHandle = registry.registerPinWithId(
+        id,
+        modelSourcePin.id,
+        modelSourcePin.type,
+        PinKind::Output,
+        modelSourcePin.label
+    );
+    usesRegistry_ = true;
+}
+
+void MultiModelSourceNode::addModel(ModelHandle handle) {
     if (!g_modelManager || !g_modelManager->isLoaded(handle)) {
         Log::warning(LOG_CATEGORY, "Cannot add model: handle not loaded");
         return;
@@ -68,10 +89,9 @@ void MultiModelNodeBase::addModel(ModelHandle handle) {
 
     // Rebuild consolidated data
     rebuildConsolidatedData();
-    onModelsChanged();
 }
 
-void MultiModelNodeBase::removeModel(size_t index) {
+void MultiModelSourceNode::removeModel(size_t index) {
     if (index >= models_.size()) {
         Log::warning(LOG_CATEGORY, "Cannot remove model: index out of range");
         return;
@@ -86,10 +106,9 @@ void MultiModelNodeBase::removeModel(size_t index) {
 
     // Rebuild consolidated data
     rebuildConsolidatedData();
-    onModelsChanged();
 }
 
-void MultiModelNodeBase::setModelEnabled(size_t index, bool enabled) {
+void MultiModelSourceNode::setModelEnabled(size_t index, bool enabled) {
     if (index >= models_.size()) {
         return;
     }
@@ -99,11 +118,10 @@ void MultiModelNodeBase::setModelEnabled(size_t index, bool enabled) {
 
         // Rebuild consolidated data
         rebuildConsolidatedData();
-        onModelsChanged();
     }
 }
 
-void MultiModelNodeBase::reorderModel(size_t fromIndex, size_t toIndex) {
+void MultiModelSourceNode::reorderModel(size_t fromIndex, size_t toIndex) {
     if (fromIndex >= models_.size() || toIndex >= models_.size()) {
         return;
     }
@@ -118,10 +136,9 @@ void MultiModelNodeBase::reorderModel(size_t fromIndex, size_t toIndex) {
 
     // Rebuild consolidated data
     rebuildConsolidatedData();
-    onModelsChanged();
 }
 
-bool MultiModelNodeBase::hasModels() const {
+bool MultiModelSourceNode::hasModels() const {
     for (const auto& entry : models_) {
         if (entry.handle.isValid() && entry.enabled &&
             g_modelManager && g_modelManager->isLoaded(entry.handle)) {
@@ -131,7 +148,7 @@ bool MultiModelNodeBase::hasModels() const {
     return false;
 }
 
-void MultiModelNodeBase::rebuildConsolidatedData() {
+void MultiModelSourceNode::rebuildConsolidatedData() {
     // Clear all consolidated data
     consolidatedVertices_.clear();
     consolidatedIndices_.clear();
@@ -260,11 +277,20 @@ void MultiModelNodeBase::rebuildConsolidatedData() {
               consolidatedIndices_.size(), consolidatedRanges_.size());
 }
 
-nlohmann::json MultiModelNodeBase::toJson() const {
+nlohmann::json MultiModelSourceNode::toJson() const {
     nlohmann::json j;
+    j["type"] = "multi_model_source";
     j["id"] = id;
     j["name"] = name;
     j["position"] = {Node::position.x, Node::position.y};
+
+    // Serialize output pin
+    j["outputPins"] = nlohmann::json::array();
+    j["outputPins"].push_back({
+        {"id", modelSourcePin.id.Get()},
+        {"type", static_cast<int>(modelSourcePin.type)},
+        {"label", modelSourcePin.label}
+    });
 
     // Serialize all models
     j["models"] = nlohmann::json::array();
@@ -276,12 +302,20 @@ nlohmann::json MultiModelNodeBase::toJson() const {
     return j;
 }
 
-void MultiModelNodeBase::fromJson(const nlohmann::json& j) {
-    name = j.value("name", "Multi Model Node");
+void MultiModelSourceNode::fromJson(const nlohmann::json& j) {
+    name = j.value("name", "Model Source");
     if (j.contains("position") && j["position"].is_array() &&
         j["position"].size() == 2) {
         Node::position =
             ImVec2(j["position"][0].get<float>(), j["position"][1].get<float>());
+    }
+
+    // Restore output pin ID
+    if (j.contains("outputPins") && j["outputPins"].is_array()) {
+        auto& pins = j["outputPins"];
+        if (pins.size() > 0) {
+            modelSourcePin.id = ed::PinId(pins[0]["id"].get<int>());
+        }
     }
 
     // Note: models are loaded by the graph serializer after fromJson()
@@ -301,10 +335,15 @@ void MultiModelNodeBase::fromJson(const nlohmann::json& j) {
     }
 }
 
-void MultiModelNodeBase::renderMultiModelNodeHeader(
+void MultiModelSourceNode::render(
     ax::NodeEditor::Utilities::BlueprintNodeBuilder& builder,
-    float nodeWidth) const {
-    // Darker orange background for multi-model nodes
+    const NodeGraph& nodeGraph
+) const {
+    // Calculate node width
+    std::vector<std::string> pinLabels = {modelSourcePin.label};
+    float nodeWidth = CalculateNodeWidth(name, pinLabels);
+
+    // Darker orange background for model source nodes
     ed::PushStyleColor(ed::StyleColor_NodeBg, ImColor(200, 100, 0, 80));
 
     builder.Begin(id);
@@ -327,7 +366,7 @@ void MultiModelNodeBase::renderMultiModelNodeHeader(
         ImGui::PopTextWrapPos();
 
         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
-            const_cast<MultiModelNodeBase*>(this)->isRenaming = true;
+            const_cast<MultiModelSourceNode*>(this)->isRenaming = true;
         }
     } else {
         // Editable name
@@ -339,8 +378,8 @@ void MultiModelNodeBase::renderMultiModelNodeHeader(
         ImGui::InputText("##NodeName", nameBuffer, sizeof(nameBuffer),
                          ImGuiInputTextFlags_AutoSelectAll);
         if (ImGui::IsItemDeactivatedAfterEdit()) {
-            const_cast<MultiModelNodeBase*>(this)->name = nameBuffer;
-            const_cast<MultiModelNodeBase*>(this)->isRenaming = false;
+            const_cast<MultiModelSourceNode*>(this)->name = nameBuffer;
+            const_cast<MultiModelSourceNode*>(this)->isRenaming = false;
         }
     }
 
@@ -357,9 +396,17 @@ void MultiModelNodeBase::renderMultiModelNodeHeader(
     ImGui::Dummy(ImVec2(0, 28));
     ImGui::Spring(0);
     builder.EndHeader();
-}
 
-float MultiModelNodeBase::calculateMultiModelNodeWidth(
-    const std::string& nodeName, const std::vector<std::string>& pinLabels) {
-    return CalculateNodeWidth(nodeName, pinLabels);
+    // Draw output pin
+    DrawOutputPin(
+        modelSourcePin.id,
+        modelSourcePin.label,
+        static_cast<int>(modelSourcePin.type),
+        nodeGraph.isPinLinked(modelSourcePin.id),
+        nodeWidth,
+        builder
+    );
+
+    builder.End();
+    ed::PopStyleColor();
 }

@@ -3,6 +3,7 @@
 #include "fixed_camera_node.h"
 #include "light_node.h"
 #include "material_node.h"
+#include "multi_model_source_node.h"
 #include "multi_vertex_data_node.h"
 #include "multi_ubo_node.h"
 #include "multi_material_node.h"
@@ -98,14 +99,24 @@ PinLookupResult NodeGraph::findPin(ax::NodeEditor::PinId id) {
                 };
         }
 
+        // --- Handle MultiModelSourceNode ---
+        if (auto* multiSource = dynamic_cast<MultiModelSourceNode*>(node.get())) {
+            if (multiSource->modelSourcePin.id == id)
+                return {multiSource, &multiSource->modelSourcePin, NodePinKind::Output};
+        }
+
         // --- Handle MultiVertexDataNode ---
         if (auto* multiVertex = dynamic_cast<MultiVertexDataNode*>(node.get())) {
+            if (multiVertex->sourceInputPin.id == id)
+                return {multiVertex, &multiVertex->sourceInputPin, NodePinKind::Input};
             if (multiVertex->vertexDataPin.id == id)
                 return {multiVertex, &multiVertex->vertexDataPin, NodePinKind::Output};
         }
 
         // --- Handle MultiUBONode ---
         if (auto* multiUbo = dynamic_cast<MultiUBONode*>(node.get())) {
+            if (multiUbo->sourceInputPin.id == id)
+                return {multiUbo, &multiUbo->sourceInputPin, NodePinKind::Input};
             if (multiUbo->modelMatrixPin.id == id)
                 return {multiUbo, &multiUbo->modelMatrixPin, NodePinKind::Output};
             if (multiUbo->cameraPin.id == id)
@@ -116,6 +127,8 @@ PinLookupResult NodeGraph::findPin(ax::NodeEditor::PinId id) {
 
         // --- Handle MultiMaterialNode ---
         if (auto* multiMat = dynamic_cast<MultiMaterialNode*>(node.get())) {
+            if (multiMat->sourceInputPin.id == id)
+                return {multiMat, &multiMat->sourceInputPin, NodePinKind::Input};
             if (multiMat->baseColorPin.id == id)
                 return {multiMat, &multiMat->baseColorPin, NodePinKind::Output};
             if (multiMat->emissivePin.id == id)
@@ -221,13 +234,18 @@ void NodeGraph::removeNode(ed::NodeId nodeId) {
         pinsToRemove.insert(camera->cameraPin.id);
     } else if (auto* light = dynamic_cast<LightNode*>(nodeToRemove)) {
         pinsToRemove.insert(light->lightArrayPin.id);
+    } else if (auto* multiSource = dynamic_cast<MultiModelSourceNode*>(nodeToRemove)) {
+        pinsToRemove.insert(multiSource->modelSourcePin.id);
     } else if (auto* multiVertex = dynamic_cast<MultiVertexDataNode*>(nodeToRemove)) {
+        pinsToRemove.insert(multiVertex->sourceInputPin.id);
         pinsToRemove.insert(multiVertex->vertexDataPin.id);
     } else if (auto* multiUbo = dynamic_cast<MultiUBONode*>(nodeToRemove)) {
+        pinsToRemove.insert(multiUbo->sourceInputPin.id);
         pinsToRemove.insert(multiUbo->modelMatrixPin.id);
         pinsToRemove.insert(multiUbo->cameraPin.id);
         pinsToRemove.insert(multiUbo->lightPin.id);
     } else if (auto* multiMat = dynamic_cast<MultiMaterialNode*>(nodeToRemove)) {
+        pinsToRemove.insert(multiMat->sourceInputPin.id);
         pinsToRemove.insert(multiMat->baseColorPin.id);
         pinsToRemove.insert(multiMat->emissivePin.id);
         pinsToRemove.insert(multiMat->metallicRoughnessPin.id);
@@ -318,13 +336,18 @@ void NodeGraph::buildDependencies() {
             pinInfo[camera->cameraPin.id] = node;
         } else if (auto* light = dynamic_cast<LightNode*>(node)) {
             pinInfo[light->lightArrayPin.id] = node;
+        } else if (auto* multiSource = dynamic_cast<MultiModelSourceNode*>(node)) {
+            pinInfo[multiSource->modelSourcePin.id] = node;
         } else if (auto* multiVertex = dynamic_cast<MultiVertexDataNode*>(node)) {
+            pinInfo[multiVertex->sourceInputPin.id] = node;
             pinInfo[multiVertex->vertexDataPin.id] = node;
         } else if (auto* multiUbo = dynamic_cast<MultiUBONode*>(node)) {
+            pinInfo[multiUbo->sourceInputPin.id] = node;
             pinInfo[multiUbo->modelMatrixPin.id] = node;
             pinInfo[multiUbo->cameraPin.id] = node;
             pinInfo[multiUbo->lightPin.id] = node;
         } else if (auto* multiMat = dynamic_cast<MultiMaterialNode*>(node)) {
+            pinInfo[multiMat->sourceInputPin.id] = node;
             pinInfo[multiMat->baseColorPin.id] = node;
             pinInfo[multiMat->emissivePin.id] = node;
             pinInfo[multiMat->metallicRoughnessPin.id] = node;

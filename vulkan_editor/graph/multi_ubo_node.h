@@ -1,20 +1,24 @@
 #pragma once
-#include "multi_model_node_base.h"
+#include "multi_model_consumer_base.h"
+#include "vulkan_editor/io/serialization.h"
 #include <glm/gtc/matrix_transform.hpp>
 
 /**
  * @class MultiUBONode
- * @brief Outputs combined uniform buffer data from multiple models.
+ * @brief Consumer node that outputs combined uniform buffer data from a model source.
+ *
+ * Connects to a MultiModelSourceNode via input pin and creates UBO primitives
+ * from the consolidated model data.
  *
  * Output pins:
  * - modelMatrixPin (UniformBuffer[]) - per-geometry model/normal matrices
  * - cameraPin (UniformBuffer) - selected GLTF camera from merged cameras
  * - lightPin (UniformBuffer) - combined GLTF lights from all models
  *
- * Camera/light pins only appear if any model contains them.
+ * Camera/light pins only appear if the source has models with cameras/lights.
  * UI shows dropdown to select which camera to use from the combined list.
  */
-class MultiUBONode : public MultiModelNodeBase {
+class MultiUBONode : public MultiModelConsumerBase, public ISerializable {
 public:
     MultiUBONode();
     explicit MultiUBONode(int id);
@@ -39,12 +43,19 @@ public:
             outputs
     ) const override;
 
-    // Camera/light selection (from merged cameras/lights)
+    // Store graph reference for accessing source node
+    void setGraph(NodeGraph* graph) { graph_ = graph; }
+
+    // Camera/light selection (from merged cameras/lights in source)
     int selectedCameraIndex{-1};
     float aspectRatio{16.0f / 9.0f};
 
     void updateCameraFromSelection();
     void updateLightsFromMerged();
+
+    // Check if source has cameras/lights (for conditional pin display)
+    bool sourceHasCameras() const;
+    bool sourceHasLights() const;
 
     // Returns pins that should have their links removed
     std::vector<ax::NodeEditor::PinId> getPinsToUnlink() const;
@@ -63,8 +74,7 @@ public:
 
 private:
     void createDefaultPins();
-    void onModelsChanged() override;
-    bool usesRegistry_ = false;
+    NodeGraph* graph_ = nullptr;
 
     // Primitive handles
     primitives::StoreHandle modelMatrixArray_{};

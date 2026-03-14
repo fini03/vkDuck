@@ -28,6 +28,7 @@ enum class PinType {
     Camera,
     Light,
     ModelCameras,
+    ModelSource,  // Multi-model source connection
     Unknown
 };
 

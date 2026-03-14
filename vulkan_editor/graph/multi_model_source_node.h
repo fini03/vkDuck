@@ -18,7 +18,7 @@ struct BlueprintNodeBuilder;
 
 /**
  * @struct ModelEntry
- * @brief Represents a single model in the multi-model node.
+ * @brief Represents a single model in the multi-model source node.
  */
 struct ModelEntry {
     ModelHandle handle;
@@ -38,25 +38,24 @@ struct ConsolidatedRangeInfo {
 };
 
 /**
- * @class MultiModelNodeBase
- * @brief Abstract base class for multi-model nodes.
+ * @class MultiModelSourceNode
+ * @brief Source node that manages multiple GLTF models and provides consolidated data.
  *
- * Provides shared functionality for nodes that reference multiple GLTF models:
+ * This node is the single source of truth for multi-model data. Consumer nodes
+ * (MultiVertexDataNode, MultiMaterialNode, MultiUBONode) connect to this node's
+ * output pin to access the consolidated model data.
+ *
+ * Features:
  * - Multiple ModelHandle management with reference counting
  * - Data consolidation (vertices, indices, materials, cameras, lights)
  * - Serialization of model paths array
- * - Common rendering helpers (orange header for model nodes)
- *
- * Derived classes:
- * - MultiVertexDataNode: combined geometry data
- * - MultiUBONode: combined matrices, cameras, lights
- * - MultiMaterialNode: combined PBR textures
+ * - Orange header for model nodes
  */
-class MultiModelNodeBase : public Node, public ISerializable {
+class MultiModelSourceNode : public Node, public ISerializable {
 public:
-    MultiModelNodeBase();
-    explicit MultiModelNodeBase(int id);
-    ~MultiModelNodeBase() override;
+    MultiModelSourceNode();
+    explicit MultiModelSourceNode(int id);
+    ~MultiModelSourceNode() override;
 
     // Model management
     void addModel(ModelHandle handle);
@@ -66,13 +65,15 @@ public:
 
     size_t getModelCount() const { return models_.size(); }
     const ModelEntry& getModel(size_t index) const { return models_[index]; }
+    ModelEntry& getModel(size_t index) { return models_[index]; }
+    const std::vector<ModelEntry>& getModels() const { return models_; }
     bool hasModels() const;
 
-    // Base serialization (derived classes should call these)
+    // Serialization
     nlohmann::json toJson() const override;
     void fromJson(const nlohmann::json& j) override;
 
-    // Consolidated data accessors
+    // Consolidated data accessors (for consumer nodes)
     const std::vector<Vertex>& getConsolidatedVertices() const {
         return consolidatedVertices_;
     }
@@ -97,8 +98,37 @@ public:
     const std::vector<GLTFLight>& getMergedLights() const {
         return mergedLights_;
     }
+    const std::vector<std::unordered_map<int, int>>& getTextureIndexRemap() const {
+        return textureIndexRemap_;
+    }
 
-protected:
+    // Node interface
+    void render(
+        ax::NodeEditor::Utilities::BlueprintNodeBuilder& builder,
+        const NodeGraph& nodeGraph
+    ) const override;
+
+    void registerPins(PinRegistry& registry) override;
+    bool usesPinRegistry() const override { return usesRegistry_; }
+
+    // Primitives (source node doesn't create GPU primitives directly)
+    void clearPrimitives() override {}
+    void createPrimitives(primitives::Store& store) override {}
+    void getOutputPrimitives(
+        const primitives::Store& store,
+        std::vector<std::pair<ax::NodeEditor::PinId, primitives::StoreHandle>>& outputs
+    ) const override {}
+
+    // Output pin
+    Pin modelSourcePin;
+    PinHandle modelSourcePinHandle = INVALID_PIN_HANDLE;
+
+    // Trigger rebuild (called by UI when models change)
+    void rebuildConsolidatedData();
+
+private:
+    void createDefaultPins();
+
     std::vector<ModelEntry> models_;
 
     // Consolidated data (rebuilt when models change)
@@ -116,21 +146,5 @@ protected:
     // Texture index remapping per model (original index -> merged index)
     std::vector<std::unordered_map<int, int>> textureIndexRemap_;
 
-    // Called after models change - derived classes can override
-    virtual void onModelsChanged() {}
-
-    // Rebuild all consolidated data from current models
-    void rebuildConsolidatedData();
-
-    // Common rendering helper for orange multi-model node header
-    void renderMultiModelNodeHeader(
-        ax::NodeEditor::Utilities::BlueprintNodeBuilder& builder,
-        float nodeWidth
-    ) const;
-
-    // Calculate node width based on pin labels
-    static float calculateMultiModelNodeWidth(
-        const std::string& nodeName,
-        const std::vector<std::string>& pinLabels
-    );
+    bool usesRegistry_ = false;
 };

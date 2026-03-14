@@ -1,19 +1,20 @@
 #pragma once
-#include "multi_model_node_base.h"
+#include "multi_model_consumer_base.h"
+#include "vulkan_editor/io/serialization.h"
 
 /**
  * @class MultiVertexDataNode
- * @brief Outputs combined vertex/index data from multiple models.
+ * @brief Consumer node that outputs combined vertex/index data from a model source.
+ *
+ * Connects to a MultiModelSourceNode via input pin and creates VertexData primitives
+ * from the consolidated geometry data.
  *
  * Single output pin: vertexDataPin (VertexData type)
  * Outputs an array of VertexData primitives, one per consolidated geometry range.
  *
- * All geometry from enabled models is merged into consolidated vertex/index buffers
- * with properly rebased indices and ranges.
- *
- * Use case: Load multiple GLTF files and render them as a combined scene.
+ * Use case: Connect to a Model Source to get combined geometry for rendering.
  */
-class MultiVertexDataNode : public MultiModelNodeBase {
+class MultiVertexDataNode : public MultiModelConsumerBase, public ISerializable {
 public:
     MultiVertexDataNode();
     explicit MultiVertexDataNode(int id);
@@ -38,12 +39,15 @@ public:
             outputs
     ) const override;
 
+    // Store graph reference for accessing source node during createPrimitives
+    void setGraph(NodeGraph* graph) { graph_ = graph; }
+
     // Output pin
     Pin vertexDataPin;
     PinHandle vertexDataPinHandle = INVALID_PIN_HANDLE;
 
 private:
     void createDefaultPins();
-    bool usesRegistry_ = false;
+    NodeGraph* graph_ = nullptr;
     primitives::StoreHandle vertexDataArray_{};
 };

@@ -20,13 +20,13 @@ namespace ed = ax::NodeEditor;
 // ============================================================================
 
 MultiMaterialNode::MultiMaterialNode()
-    : MultiModelNodeBase() {
+    : MultiModelConsumerBase() {
     name = "Multi Material";
     createDefaultPins();
 }
 
 MultiMaterialNode::MultiMaterialNode(int id)
-    : MultiModelNodeBase(id) {
+    : MultiModelConsumerBase(id) {
     name = "Multi Material";
     createDefaultPins();
 }
@@ -60,6 +60,10 @@ void MultiMaterialNode::createDefaultPins() {
 // ============================================================================
 
 void MultiMaterialNode::registerPins(PinRegistry& registry) {
+    // Register source input pin from base class
+    registerSourceInputPin(registry);
+
+    // Register output pins
     baseColorPinHandle = registry.registerPinWithId(
         id, baseColorPin.id, baseColorPin.type, PinKind::Output,
         baseColorPin.label);
@@ -78,8 +82,6 @@ void MultiMaterialNode::registerPins(PinRegistry& registry) {
     materialParamsPinHandle = registry.registerPinWithId(
         id, materialParamsPin.id, materialParamsPin.type, PinKind::Output,
         materialParamsPin.label);
-
-    usesRegistry_ = true;
 }
 
 // ============================================================================
@@ -87,9 +89,16 @@ void MultiMaterialNode::registerPins(PinRegistry& registry) {
 // ============================================================================
 
 nlohmann::json MultiMaterialNode::toJson() const {
-    nlohmann::json j = MultiModelNodeBase::toJson();
+    nlohmann::json j;
     j["type"] = "multi_material";
+    j["id"] = id;
+    j["name"] = name;
+    j["position"] = {Node::position.x, Node::position.y};
 
+    // Serialize input pin (source connection)
+    sourceInputPinToJson(j);
+
+    // Serialize output pins
     j["outputPins"] = nlohmann::json::array({
         {{"id", baseColorPin.id.Get()},
          {"type", static_cast<int>(baseColorPin.type)},
@@ -112,8 +121,17 @@ nlohmann::json MultiMaterialNode::toJson() const {
 }
 
 void MultiMaterialNode::fromJson(const nlohmann::json& j) {
-    MultiModelNodeBase::fromJson(j);
+    name = j.value("name", "Multi Material");
+    if (j.contains("position") && j["position"].is_array() &&
+        j["position"].size() == 2) {
+        Node::position =
+            ImVec2(j["position"][0].get<float>(), j["position"][1].get<float>());
+    }
 
+    // Restore input pin
+    sourceInputPinFromJson(j);
+
+    // Restore output pins
     if (j.contains("outputPins") && j["outputPins"].is_array()) {
         const auto& pins = j["outputPins"];
         if (pins.size() > 0)
@@ -137,11 +155,23 @@ void MultiMaterialNode::render(
     ax::NodeEditor::Utilities::BlueprintNodeBuilder& builder,
     const NodeGraph& nodeGraph) const {
     std::vector<std::string> pinLabels = {
+        sourceInputPin.label,
         baseColorPin.label, metallicRoughnessPin.label, normalPin.label,
         emissivePin.label, materialParamsPin.label};
-    float nodeWidth = calculateMultiModelNodeWidth(name, pinLabels);
-    renderMultiModelNodeHeader(builder, nodeWidth);
+    float nodeWidth = calculateConsumerNodeWidth(name, pinLabels);
+    renderConsumerNodeHeader(builder, nodeWidth);
 
+    // Draw input pin (source connection)
+    DrawInputPin(
+        sourceInputPin.id,
+        sourceInputPin.label,
+        static_cast<int>(sourceInputPin.type),
+        nodeGraph.isPinLinked(sourceInputPin.id),
+        nodeWidth,
+        builder
+    );
+
+    // Draw output pins
     auto drawPin = [&](const Pin& pin) {
         DrawOutputPin(pin.id, pin.label, static_cast<int>(pin.type),
                       nodeGraph.isPinLinked(pin.id), nodeWidth, builder);
@@ -216,13 +246,24 @@ primitives::StoreHandle MultiMaterialNode::createImagePrimitive(
 }
 
 void MultiMaterialNode::createPrimitives(primitives::Store& store) {
-    const auto& ranges = getConsolidatedRanges();
-    const auto& mergedMaterials = getMergedMaterials();
-    const auto& mergedImages = getMergedImages();
+    if (!graph_) {
+        Log::warning(LOG_CATEGORY, "Cannot create primitives: no graph reference");
+        return;
+    }
+
+    MultiModelSourceNode* source = findSourceNode(*graph_);
+    if (!source) {
+        Log::warning(LOG_CATEGORY, "Cannot create primitives: not connected to source");
+        return;
+    }
+
+    const auto& ranges = source->getConsolidatedRanges();
+    const auto& mergedMaterials = source->getMergedMaterials();
+    const auto& mergedImages = source->getMergedImages();
     const size_t numRanges = ranges.size();
 
     if (numRanges == 0) {
-        Log::warning(LOG_CATEGORY, "No models loaded");
+        Log::warning(LOG_CATEGORY, "No models loaded in source");
         return;
     }
 
@@ -344,8 +385,8 @@ void MultiMaterialNode::createPrimitives(primitives::Store& store) {
     }
 
     Log::info(LOG_CATEGORY,
-              "Created material arrays for {} geometry ranges from {} models",
-              numRanges, models_.size());
+              "Created material arrays for {} geometry ranges from source",
+              numRanges);
 }
 
 void MultiMaterialNode::getOutputPrimitives(

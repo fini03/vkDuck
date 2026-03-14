@@ -17,13 +17,13 @@ constexpr const char* LOG_CATEGORY = "MultiUBONode";
 namespace ed = ax::NodeEditor;
 
 MultiUBONode::MultiUBONode()
-    : MultiModelNodeBase() {
+    : MultiModelConsumerBase() {
     name = "Multi UBO";
     createDefaultPins();
 }
 
 MultiUBONode::MultiUBONode(int id)
-    : MultiModelNodeBase(id) {
+    : MultiModelConsumerBase(id) {
     name = "Multi UBO";
     createDefaultPins();
 }
@@ -48,6 +48,10 @@ void MultiUBONode::createDefaultPins() {
 }
 
 void MultiUBONode::registerPins(PinRegistry& registry) {
+    // Register source input pin from base class
+    registerSourceInputPin(registry);
+
+    // Register output pins
     modelMatrixPinHandle = registry.registerPinWithId(
         id, modelMatrixPin.id, modelMatrixPin.type, PinKind::Output,
         modelMatrixPin.label);
@@ -57,30 +61,28 @@ void MultiUBONode::registerPins(PinRegistry& registry) {
 
     lightPinHandle = registry.registerPinWithId(
         id, lightPin.id, lightPin.type, PinKind::Output, lightPin.label);
-
-    usesRegistry_ = true;
 }
 
-void MultiUBONode::onModelsChanged() {
-    // Auto-select first camera if available
-    const auto& cameras = getMergedCameras();
-    if (!cameras.empty()) {
-        selectedCameraIndex = 0;
-    } else {
-        selectedCameraIndex = -1;
-    }
+bool MultiUBONode::sourceHasCameras() const {
+    if (!graph_) return false;
+    MultiModelSourceNode* source = findSourceNode(*graph_);
+    return source && !source->getMergedCameras().empty();
+}
+
+bool MultiUBONode::sourceHasLights() const {
+    if (!graph_) return false;
+    MultiModelSourceNode* source = findSourceNode(*graph_);
+    return source && !source->getMergedLights().empty();
 }
 
 std::vector<ed::PinId> MultiUBONode::getPinsToUnlink() const {
     std::vector<ed::PinId> pins;
-    const auto& cameras = getMergedCameras();
-    const auto& lights = getMergedLights();
 
-    if (cameras.empty()) {
+    if (!sourceHasCameras()) {
         pins.push_back(cameraPin.id);
     }
 
-    if (lights.empty()) {
+    if (!sourceHasLights()) {
         pins.push_back(lightPin.id);
     }
 
@@ -88,10 +90,17 @@ std::vector<ed::PinId> MultiUBONode::getPinsToUnlink() const {
 }
 
 nlohmann::json MultiUBONode::toJson() const {
-    nlohmann::json j = MultiModelNodeBase::toJson();
+    nlohmann::json j;
     j["type"] = "multi_ubo";
+    j["id"] = id;
+    j["name"] = name;
+    j["position"] = {Node::position.x, Node::position.y};
     j["selectedCameraIndex"] = selectedCameraIndex;
 
+    // Serialize input pin (source connection)
+    sourceInputPinToJson(j);
+
+    // Serialize output pins
     j["outputPins"] = nlohmann::json::array();
     j["outputPins"].push_back({{"id", modelMatrixPin.id.Get()},
                                {"type", static_cast<int>(modelMatrixPin.type)},
@@ -107,10 +116,19 @@ nlohmann::json MultiUBONode::toJson() const {
 }
 
 void MultiUBONode::fromJson(const nlohmann::json& j) {
-    MultiModelNodeBase::fromJson(j);
+    name = j.value("name", "Multi UBO");
+    if (j.contains("position") && j["position"].is_array() &&
+        j["position"].size() == 2) {
+        Node::position =
+            ImVec2(j["position"][0].get<float>(), j["position"][1].get<float>());
+    }
 
     selectedCameraIndex = j.value("selectedCameraIndex", -1);
 
+    // Restore input pin
+    sourceInputPinFromJson(j);
+
+    // Restore output pins
     if (j.contains("outputPins") && j["outputPins"].is_array()) {
         auto& pins = j["outputPins"];
         if (pins.size() > 0)
@@ -125,35 +143,45 @@ void MultiUBONode::fromJson(const nlohmann::json& j) {
 void MultiUBONode::render(
     ax::NodeEditor::Utilities::BlueprintNodeBuilder& builder,
     const NodeGraph& nodeGraph) const {
-    const auto& cameras = getMergedCameras();
-    const auto& lights = getMergedLights();
+    bool hasCameras = sourceHasCameras();
+    bool hasLights = sourceHasLights();
 
     // Build pin labels based on what's available
-    std::vector<std::string> pinLabels = {modelMatrixPin.label};
-    if (!cameras.empty()) {
+    std::vector<std::string> pinLabels = {sourceInputPin.label, modelMatrixPin.label};
+    if (hasCameras) {
         pinLabels.push_back(cameraPin.label);
     }
-    if (!lights.empty()) {
+    if (hasLights) {
         pinLabels.push_back(lightPin.label);
     }
 
-    float nodeWidth = calculateMultiModelNodeWidth(name, pinLabels);
-    renderMultiModelNodeHeader(builder, nodeWidth);
+    float nodeWidth = calculateConsumerNodeWidth(name, pinLabels);
+    renderConsumerNodeHeader(builder, nodeWidth);
+
+    // Draw input pin (source connection)
+    DrawInputPin(
+        sourceInputPin.id,
+        sourceInputPin.label,
+        static_cast<int>(sourceInputPin.type),
+        nodeGraph.isPinLinked(sourceInputPin.id),
+        nodeWidth,
+        builder
+    );
 
     // Model matrix pin (always shown)
     DrawOutputPin(modelMatrixPin.id, modelMatrixPin.label,
                   static_cast<int>(modelMatrixPin.type),
                   nodeGraph.isPinLinked(modelMatrixPin.id), nodeWidth, builder);
 
-    // Camera pin (only if any model has cameras)
-    if (!cameras.empty()) {
+    // Camera pin (only if source has cameras)
+    if (hasCameras) {
         DrawOutputPin(cameraPin.id, cameraPin.label,
                       static_cast<int>(cameraPin.type),
                       nodeGraph.isPinLinked(cameraPin.id), nodeWidth, builder);
     }
 
-    // Light pin (only if any model has lights)
-    if (!lights.empty()) {
+    // Light pin (only if source has lights)
+    if (hasLights) {
         DrawOutputPin(lightPin.id, lightPin.label,
                       static_cast<int>(lightPin.type),
                       nodeGraph.isPinLinked(lightPin.id), nodeWidth, builder);
@@ -174,14 +202,30 @@ void MultiUBONode::clearPrimitives() {
 }
 
 void MultiUBONode::createPrimitives(primitives::Store& store) {
-    const auto& ranges = getConsolidatedRanges();
-    const auto& cameras = getMergedCameras();
-    const auto& lights = getMergedLights();
+    if (!graph_) {
+        Log::warning(LOG_CATEGORY, "Cannot create primitives: no graph reference");
+        return;
+    }
+
+    MultiModelSourceNode* source = findSourceNode(*graph_);
+    if (!source) {
+        Log::warning(LOG_CATEGORY, "Cannot create primitives: not connected to source");
+        return;
+    }
+
+    const auto& ranges = source->getConsolidatedRanges();
+    const auto& cameras = source->getMergedCameras();
+    const auto& lights = source->getMergedLights();
 
     if (ranges.empty()) {
         Log::warning(LOG_CATEGORY,
-                     "Cannot create primitives: no models loaded");
+                     "Cannot create primitives: no models loaded in source");
         return;
+    }
+
+    // Auto-select first camera if not yet selected
+    if (selectedCameraIndex < 0 && !cameras.empty()) {
+        const_cast<MultiUBONode*>(this)->selectedCameraIndex = 0;
     }
 
     // Create model matrix array
@@ -220,7 +264,7 @@ void MultiUBONode::createPrimitives(primitives::Store& store) {
                    i);
     }
 
-    // Create camera UBO if any model has cameras
+    // Create camera UBO if source has cameras
     if (!cameras.empty()) {
         primitives::StoreHandle hCameraUbo = store.newUniformBuffer();
         cameraUbo_ = &store.uniformBuffers[hCameraUbo.handle];
@@ -241,7 +285,7 @@ void MultiUBONode::createPrimitives(primitives::Store& store) {
                    cameras.size());
     }
 
-    // Create light UBO if any model has lights
+    // Create light UBO if source has lights
     if (!lights.empty()) {
         updateLightsFromMerged();
 
@@ -279,8 +323,8 @@ void MultiUBONode::createPrimitives(primitives::Store& store) {
                    lightsBuffer_.header.numLights, lightUbo_->data.size());
     }
 
-    Log::info(LOG_CATEGORY, "Created UBOs for {} ranges from {} models",
-              ranges.size(), models_.size());
+    Log::info(LOG_CATEGORY, "Created UBOs for {} ranges from source",
+              ranges.size());
 }
 
 void MultiUBONode::getOutputPrimitives(
@@ -299,7 +343,12 @@ void MultiUBONode::getOutputPrimitives(
 }
 
 void MultiUBONode::updateCameraFromSelection() {
-    const auto& cameras = getMergedCameras();
+    if (!graph_) return;
+
+    MultiModelSourceNode* source = findSourceNode(*graph_);
+    if (!source) return;
+
+    const auto& cameras = source->getMergedCameras();
 
     // Check if we have a valid camera selected
     if (selectedCameraIndex < 0 ||
@@ -349,7 +398,12 @@ void MultiUBONode::updateCameraFromSelection() {
 }
 
 void MultiUBONode::updateLightsFromMerged() {
-    const auto& lights = getMergedLights();
+    if (!graph_) return;
+
+    MultiModelSourceNode* source = findSourceNode(*graph_);
+    if (!source) return;
+
+    const auto& lights = source->getMergedLights();
 
     // Resize to match merged lights
     lightsBuffer_.lights.resize(lights.size());

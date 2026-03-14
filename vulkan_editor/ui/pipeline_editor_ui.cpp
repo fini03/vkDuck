@@ -18,7 +18,7 @@
 #include "vulkan_editor/graph/present_node.h"
 #include "vulkan_editor/graph/ubo_node.h"
 #include "vulkan_editor/graph/vertex_data_node.h"
-#include "vulkan_editor/graph/multi_model_node_base.h"
+#include "vulkan_editor/graph/multi_model_source_node.h"
 #include "vulkan_editor/graph/multi_vertex_data_node.h"
 #include "vulkan_editor/graph/multi_ubo_node.h"
 #include "vulkan_editor/graph/multi_material_node.h"
@@ -142,7 +142,7 @@ void PipelineEditorUI::DrawPaneHeader(float paneWidth) {
         ImGui::TextUnformatted("Pipeline Settings");
     } else if (selectedVertexData || selectedUBO || selectedMaterial) {
         ImGui::TextUnformatted("Model Settings");
-    } else if (selectedMultiVertexData || selectedMultiUBO || selectedMultiMaterial) {
+    } else if (selectedMultiModelSource || selectedMultiVertexData || selectedMultiUBO || selectedMultiMaterial) {
         ImGui::TextUnformatted("Multi-Model Settings");
     } else {
         ImGui::TextUnformatted("Node Settings");
@@ -190,6 +190,8 @@ void PipelineEditorUI::DrawNodeSettings(ShaderManager* shaderManager) {
         LightEditorUI::Draw(selectedLight, uboWithLights);
     } else if (selectedPresent) {
         ImGui::TextWrapped("Present Node - displays final output");
+    } else if (selectedMultiModelSource) {
+        MultiModelSettingsUI::Draw(selectedMultiModelSource, shaderManager, &graph);
     } else if (selectedMultiVertexData) {
         MultiModelSettingsUI::Draw(selectedMultiVertexData, shaderManager, &graph);
     } else if (selectedMultiUBO) {
@@ -476,6 +478,11 @@ void PipelineEditorUI::DeleteNodes() {
                     deletedId) {
                 selectedLight = nullptr;
             }
+            if (selectedMultiModelSource &&
+                static_cast<uint64_t>(selectedMultiModelSource->getId()) ==
+                    deletedId) {
+                selectedMultiModelSource = nullptr;
+            }
             if (selectedMultiVertexData &&
                 static_cast<uint64_t>(selectedMultiVertexData->getId()) ==
                     deletedId) {
@@ -588,6 +595,7 @@ void PipelineEditorUI::UpdateSelectedNode(ed::NodeId selectedNodeId) {
             selectedVertexData = dynamic_cast<VertexDataNode*>(node.get());
             selectedUBO = dynamic_cast<UBONode*>(node.get());
             selectedMaterial = dynamic_cast<MaterialNode*>(node.get());
+            selectedMultiModelSource = dynamic_cast<MultiModelSourceNode*>(node.get());
             selectedMultiVertexData = dynamic_cast<MultiVertexDataNode*>(node.get());
             selectedMultiUBO = dynamic_cast<MultiUBONode*>(node.get());
             selectedMultiMaterial = dynamic_cast<MultiMaterialNode*>(node.get());
@@ -604,6 +612,7 @@ void PipelineEditorUI::ClearSelection() {
     selectedVertexData = nullptr;
     selectedUBO = nullptr;
     selectedMaterial = nullptr;
+    selectedMultiModelSource = nullptr;
     selectedMultiVertexData = nullptr;
     selectedMultiUBO = nullptr;
     selectedMultiMaterial = nullptr;
@@ -670,6 +679,16 @@ std::vector<MultiMaterialNode*> PipelineEditorUI::getAllMultiMaterialNodes() con
     for (const auto& node : graph.nodes) {
         if (auto* multiMaterial = dynamic_cast<MultiMaterialNode*>(node.get())) {
             result.push_back(multiMaterial);
+        }
+    }
+    return result;
+}
+
+std::vector<MultiModelSourceNode*> PipelineEditorUI::getAllMultiModelSourceNodes() const {
+    std::vector<MultiModelSourceNode*> result;
+    for (const auto& node : graph.nodes) {
+        if (auto* source = dynamic_cast<MultiModelSourceNode*>(node.get())) {
+            result.push_back(source);
         }
     }
     return result;
@@ -767,23 +786,35 @@ void PipelineEditorUI::ShowBackgroundContextMenu(
 
     // Multi-Model submenu for nodes that combine multiple GLTF files
     if (ImGui::BeginMenu("Multi-Model")) {
-        if (ImGui::MenuItem("Vertex Data (Multi)")) {
+        if (ImGui::MenuItem("Model Source")) {
+            auto node = std::make_unique<MultiModelSourceNode>();
+            auto* nodePtr = node.get();
+            graph.addNode(std::move(node));
+            setNodePosition(nodePtr);
+        }
+
+        ImGui::Separator();
+
+        if (ImGui::MenuItem("Vertex Data")) {
             auto node = std::make_unique<MultiVertexDataNode>();
             auto* nodePtr = node.get();
+            nodePtr->setGraph(&graph);
             graph.addNode(std::move(node));
             setNodePosition(nodePtr);
         }
 
-        if (ImGui::MenuItem("UBO (Multi)")) {
+        if (ImGui::MenuItem("UBO")) {
             auto node = std::make_unique<MultiUBONode>();
             auto* nodePtr = node.get();
+            nodePtr->setGraph(&graph);
             graph.addNode(std::move(node));
             setNodePosition(nodePtr);
         }
 
-        if (ImGui::MenuItem("Material (Multi)")) {
+        if (ImGui::MenuItem("Material")) {
             auto node = std::make_unique<MultiMaterialNode>();
             auto* nodePtr = node.get();
+            nodePtr->setGraph(&graph);
             graph.addNode(std::move(node));
             setNodePosition(nodePtr);
         }

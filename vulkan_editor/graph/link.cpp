@@ -139,6 +139,8 @@ const char* pinTypeName(PinType type) {
         return "Light";
     case PinType::ModelCameras:
         return "Model Cameras";
+    case PinType::ModelSource:
+        return "Model Source";
     default:
         return "Unknown";
     }

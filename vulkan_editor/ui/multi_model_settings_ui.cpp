@@ -1,6 +1,6 @@
 #include "multi_model_settings_ui.h"
 #include "../asset/model_manager.h"
-#include "../graph/multi_model_node_base.h"
+#include "../graph/multi_model_source_node.h"
 #include "../graph/multi_vertex_data_node.h"
 #include "../graph/multi_ubo_node.h"
 #include "../graph/multi_material_node.h"
@@ -11,12 +11,16 @@
 
 namespace fs = std::filesystem;
 
+// ============================================================================
+// Source Node Settings
+// ============================================================================
+
 void MultiModelSettingsUI::Draw(
-    MultiModelNodeBase* node,
-    ShaderManager* shaderManager,
-    NodeGraph* graph) {
+    MultiModelSourceNode* node,
+    ShaderManager* /*shaderManager*/,
+    NodeGraph* /*graph*/) {
     if (!node) {
-        ImGui::TextWrapped("No multi-model node selected.");
+        ImGui::TextWrapped("No source node selected.");
         return;
     }
 
@@ -25,18 +29,9 @@ void MultiModelSettingsUI::Draw(
 
     // Draw model list management
     DrawModelList(node);
-
-    // Dispatch to specific node type UI
-    if (auto* vertexData = dynamic_cast<MultiVertexDataNode*>(node)) {
-        DrawMultiVertexDataSettings(vertexData);
-    } else if (auto* ubo = dynamic_cast<MultiUBONode*>(node)) {
-        DrawMultiUBOSettings(ubo);
-    } else if (auto* material = dynamic_cast<MultiMaterialNode*>(node)) {
-        DrawMultiMaterialSettings(material);
-    }
 }
 
-void MultiModelSettingsUI::DrawModelList(MultiModelNodeBase* node) {
+void MultiModelSettingsUI::DrawModelList(MultiModelSourceNode* node) {
     const size_t modelCount = node->getModelCount();
 
     // Header with count
@@ -46,7 +41,7 @@ void MultiModelSettingsUI::DrawModelList(MultiModelNodeBase* node) {
     if (modelCount == 0) {
         ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.4f, 1.0f), "No models added");
         ImGui::TextWrapped(
-            "Use the Asset Library tab to add models to this node.");
+            "Use the Asset Library tab to add models to this source node.");
     } else {
         // Draw model list
         ImGui::BeginChild("ModelList", ImVec2(0, 150), true);
@@ -109,7 +104,7 @@ void MultiModelSettingsUI::DrawModelList(MultiModelNodeBase* node) {
     // Consolidated stats
     if (modelCount > 0) {
         ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.3f, 1.0f), "Consolidated");
+        ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.3f, 1.0f), "Consolidated Data");
         ImGui::Text("Total Vertices: %zu",
                     node->getConsolidatedVertices().size());
         ImGui::Text("Total Indices: %zu",
@@ -128,11 +123,102 @@ void MultiModelSettingsUI::DrawModelList(MultiModelNodeBase* node) {
     ImGui::Spacing();
 }
 
-void MultiModelSettingsUI::DrawMultiVertexDataSettings(
-    MultiVertexDataNode* node) {
-    const auto& ranges = node->getConsolidatedRanges();
+// ============================================================================
+// Consumer Node Settings
+// ============================================================================
 
+void MultiModelSettingsUI::DrawConnectionStatus(
+    const char* nodeType,
+    bool hasValidSource,
+    const char* sourceName) {
+    if (hasValidSource) {
+        ImGui::TextColored(ImVec4(0.5f, 0.9f, 0.5f, 1.0f),
+                           "Connected to: %s", sourceName);
+    } else {
+        ImGui::TextColored(ImVec4(0.9f, 0.5f, 0.2f, 1.0f),
+                           "Not connected to a Model Source");
+        ImGui::TextWrapped(
+            "Connect this %s node's Source input to a Model Source node "
+            "to receive model data.", nodeType);
+    }
     ImGui::Separator();
+}
+
+void MultiModelSettingsUI::Draw(
+    MultiVertexDataNode* node,
+    ShaderManager* /*shaderManager*/,
+    NodeGraph* graph) {
+    if (!node) {
+        ImGui::TextWrapped("No vertex data node selected.");
+        return;
+    }
+
+    ImGui::Text("%s Settings", node->name.c_str());
+    ImGui::Separator();
+
+    // Show connection status
+    MultiModelSourceNode* source = graph ? node->findSourceNode(*graph) : nullptr;
+    DrawConnectionStatus("Vertex Data", source != nullptr,
+                         source ? source->name.c_str() : "");
+
+    // Draw node-specific settings
+    DrawMultiVertexDataSettings(node, graph);
+}
+
+void MultiModelSettingsUI::Draw(
+    MultiUBONode* node,
+    ShaderManager* /*shaderManager*/,
+    NodeGraph* graph) {
+    if (!node) {
+        ImGui::TextWrapped("No UBO node selected.");
+        return;
+    }
+
+    ImGui::Text("%s Settings", node->name.c_str());
+    ImGui::Separator();
+
+    // Show connection status
+    MultiModelSourceNode* source = graph ? node->findSourceNode(*graph) : nullptr;
+    DrawConnectionStatus("UBO", source != nullptr,
+                         source ? source->name.c_str() : "");
+
+    // Draw node-specific settings
+    DrawMultiUBOSettings(node, graph);
+}
+
+void MultiModelSettingsUI::Draw(
+    MultiMaterialNode* node,
+    ShaderManager* /*shaderManager*/,
+    NodeGraph* graph) {
+    if (!node) {
+        ImGui::TextWrapped("No material node selected.");
+        return;
+    }
+
+    ImGui::Text("%s Settings", node->name.c_str());
+    ImGui::Separator();
+
+    // Show connection status
+    MultiModelSourceNode* source = graph ? node->findSourceNode(*graph) : nullptr;
+    DrawConnectionStatus("Material", source != nullptr,
+                         source ? source->name.c_str() : "");
+
+    // Draw node-specific settings
+    DrawMultiMaterialSettings(node, graph);
+}
+
+// ============================================================================
+// Node-Specific Settings
+// ============================================================================
+
+void MultiModelSettingsUI::DrawMultiVertexDataSettings(
+    MultiVertexDataNode* node,
+    NodeGraph* graph) {
+    MultiModelSourceNode* source = graph ? node->findSourceNode(*graph) : nullptr;
+    if (!source) return;
+
+    const auto& ranges = source->getConsolidatedRanges();
+
     ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.3f, 1.0f), "Vertex Data Output");
     ImGui::TextWrapped(
         "Outputs vertex/index data for %zu consolidated geometry ranges. "
@@ -140,10 +226,15 @@ void MultiModelSettingsUI::DrawMultiVertexDataSettings(
         ranges.size());
 }
 
-void MultiModelSettingsUI::DrawMultiUBOSettings(MultiUBONode* node) {
-    const auto& ranges = node->getConsolidatedRanges();
-    const auto& cameras = node->getMergedCameras();
-    const auto& lights = node->getMergedLights();
+void MultiModelSettingsUI::DrawMultiUBOSettings(
+    MultiUBONode* node,
+    NodeGraph* graph) {
+    MultiModelSourceNode* source = graph ? node->findSourceNode(*graph) : nullptr;
+    if (!source) return;
+
+    const auto& ranges = source->getConsolidatedRanges();
+    const auto& cameras = source->getMergedCameras();
+    const auto& lights = source->getMergedLights();
 
     // GLTF Cameras dropdown (from merged cameras)
     if (!cameras.empty()) {
@@ -233,10 +324,15 @@ void MultiModelSettingsUI::DrawMultiUBOSettings(MultiUBONode* node) {
         ranges.size());
 }
 
-void MultiModelSettingsUI::DrawMultiMaterialSettings(MultiMaterialNode* node) {
-    const auto& ranges = node->getConsolidatedRanges();
-    const auto& materials = node->getMergedMaterials();
-    const auto& images = node->getMergedImages();
+void MultiModelSettingsUI::DrawMultiMaterialSettings(
+    MultiMaterialNode* node,
+    NodeGraph* graph) {
+    MultiModelSourceNode* source = graph ? node->findSourceNode(*graph) : nullptr;
+    if (!source) return;
+
+    const auto& ranges = source->getConsolidatedRanges();
+    const auto& materials = source->getMergedMaterials();
+    const auto& images = source->getMergedImages();
 
     ImGui::Separator();
     ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.3f, 1.0f), "Material Outputs");
