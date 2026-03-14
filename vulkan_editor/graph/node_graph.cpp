@@ -3,6 +3,9 @@
 #include "fixed_camera_node.h"
 #include "light_node.h"
 #include "material_node.h"
+#include "multi_vertex_data_node.h"
+#include "multi_ubo_node.h"
+#include "multi_material_node.h"
 #include "node.h"
 #include "pipeline_node.h"
 #include "present_node.h"
@@ -93,6 +96,36 @@ PinLookupResult NodeGraph::findPin(ax::NodeEditor::PinId id) {
                 return {
                     light, &light->lightArrayPin, NodePinKind::Output
                 };
+        }
+
+        // --- Handle MultiVertexDataNode ---
+        if (auto* multiVertex = dynamic_cast<MultiVertexDataNode*>(node.get())) {
+            if (multiVertex->vertexDataPin.id == id)
+                return {multiVertex, &multiVertex->vertexDataPin, NodePinKind::Output};
+        }
+
+        // --- Handle MultiUBONode ---
+        if (auto* multiUbo = dynamic_cast<MultiUBONode*>(node.get())) {
+            if (multiUbo->modelMatrixPin.id == id)
+                return {multiUbo, &multiUbo->modelMatrixPin, NodePinKind::Output};
+            if (multiUbo->cameraPin.id == id)
+                return {multiUbo, &multiUbo->cameraPin, NodePinKind::Output};
+            if (multiUbo->lightPin.id == id)
+                return {multiUbo, &multiUbo->lightPin, NodePinKind::Output};
+        }
+
+        // --- Handle MultiMaterialNode ---
+        if (auto* multiMat = dynamic_cast<MultiMaterialNode*>(node.get())) {
+            if (multiMat->baseColorPin.id == id)
+                return {multiMat, &multiMat->baseColorPin, NodePinKind::Output};
+            if (multiMat->emissivePin.id == id)
+                return {multiMat, &multiMat->emissivePin, NodePinKind::Output};
+            if (multiMat->metallicRoughnessPin.id == id)
+                return {multiMat, &multiMat->metallicRoughnessPin, NodePinKind::Output};
+            if (multiMat->normalPin.id == id)
+                return {multiMat, &multiMat->normalPin, NodePinKind::Output};
+            if (multiMat->materialParamsPin.id == id)
+                return {multiMat, &multiMat->materialParamsPin, NodePinKind::Output};
         }
 
         // --- Handle PipelineNode ---
@@ -188,6 +221,18 @@ void NodeGraph::removeNode(ed::NodeId nodeId) {
         pinsToRemove.insert(camera->cameraPin.id);
     } else if (auto* light = dynamic_cast<LightNode*>(nodeToRemove)) {
         pinsToRemove.insert(light->lightArrayPin.id);
+    } else if (auto* multiVertex = dynamic_cast<MultiVertexDataNode*>(nodeToRemove)) {
+        pinsToRemove.insert(multiVertex->vertexDataPin.id);
+    } else if (auto* multiUbo = dynamic_cast<MultiUBONode*>(nodeToRemove)) {
+        pinsToRemove.insert(multiUbo->modelMatrixPin.id);
+        pinsToRemove.insert(multiUbo->cameraPin.id);
+        pinsToRemove.insert(multiUbo->lightPin.id);
+    } else if (auto* multiMat = dynamic_cast<MultiMaterialNode*>(nodeToRemove)) {
+        pinsToRemove.insert(multiMat->baseColorPin.id);
+        pinsToRemove.insert(multiMat->emissivePin.id);
+        pinsToRemove.insert(multiMat->metallicRoughnessPin.id);
+        pinsToRemove.insert(multiMat->normalPin.id);
+        pinsToRemove.insert(multiMat->materialParamsPin.id);
     } else if (auto* pipeline =
                    dynamic_cast<PipelineNode*>(nodeToRemove)) {
         if (pipeline->vertexDataPin.id.Get() != 0) {
@@ -273,6 +318,18 @@ void NodeGraph::buildDependencies() {
             pinInfo[camera->cameraPin.id] = node;
         } else if (auto* light = dynamic_cast<LightNode*>(node)) {
             pinInfo[light->lightArrayPin.id] = node;
+        } else if (auto* multiVertex = dynamic_cast<MultiVertexDataNode*>(node)) {
+            pinInfo[multiVertex->vertexDataPin.id] = node;
+        } else if (auto* multiUbo = dynamic_cast<MultiUBONode*>(node)) {
+            pinInfo[multiUbo->modelMatrixPin.id] = node;
+            pinInfo[multiUbo->cameraPin.id] = node;
+            pinInfo[multiUbo->lightPin.id] = node;
+        } else if (auto* multiMat = dynamic_cast<MultiMaterialNode*>(node)) {
+            pinInfo[multiMat->baseColorPin.id] = node;
+            pinInfo[multiMat->emissivePin.id] = node;
+            pinInfo[multiMat->metallicRoughnessPin.id] = node;
+            pinInfo[multiMat->normalPin.id] = node;
+            pinInfo[multiMat->materialParamsPin.id] = node;
         } else if (auto* pipeline = dynamic_cast<PipelineNode*>(node)) {
             // Input bindings
             for (auto& binding : pipeline->inputBindings)

@@ -13,6 +13,9 @@ class PipelineNode;
 class VertexDataNode;
 class UBONode;
 class MaterialNode;
+class MultiVertexDataNode;
+class MultiUBONode;
+class MultiMaterialNode;
 class PresentNode;
 class LightNode;
 class CameraNodeBase;
@@ -88,6 +91,9 @@ private:
     VertexDataNode* selectedVertexData = nullptr;
     UBONode* selectedUBO = nullptr;
     MaterialNode* selectedMaterial = nullptr;
+    MultiVertexDataNode* selectedMultiVertexData = nullptr;
+    MultiUBONode* selectedMultiUBO = nullptr;
+    MultiMaterialNode* selectedMultiMaterial = nullptr;
     PresentNode* selectedPresent = nullptr;
     CameraNodeBase* selectedCamera = nullptr;
     LightNode* selectedLight = nullptr;
@@ -115,6 +121,21 @@ public:
     std::vector<VertexDataNode*> getAllVertexDataNodes() const;
     std::vector<UBONode*> getAllUBONodes() const;
     std::vector<MaterialNode*> getAllMaterialNodes() const;
+
+    /**
+     * @brief Get ALL multi-model nodes in the graph.
+     * Used for "Use in Node" to add models to multi-model nodes.
+     */
+    std::vector<MultiVertexDataNode*> getAllMultiVertexDataNodes() const;
+    std::vector<MultiUBONode*> getAllMultiUBONodes() const;
+    std::vector<MultiMaterialNode*> getAllMultiMaterialNodes() const;
+
+    /**
+     * @brief Get the currently selected multi-model nodes (if any).
+     */
+    MultiVertexDataNode* getSelectedMultiVertexDataNode() const { return selectedMultiVertexData; }
+    MultiUBONode* getSelectedMultiUBONode() const { return selectedMultiUBO; }
+    MultiMaterialNode* getSelectedMultiMaterialNode() const { return selectedMultiMaterial; }
 
     void* m_HeaderBackground = nullptr;
 };

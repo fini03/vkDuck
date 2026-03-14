@@ -11,6 +11,9 @@
 #include "graph/node_graph.h"
 #include "graph/ubo_node.h"
 #include "graph/vertex_data_node.h"
+#include "graph/multi_vertex_data_node.h"
+#include "graph/multi_ubo_node.h"
+#include "graph/multi_material_node.h"
 #include "shader/shader_manager.h"
 #include "asset/asset_library_ui.h"
 #include "ui/camera_editor_ui.h"
@@ -60,13 +63,20 @@ Editor::Editor(
             return;
         }
 
-        // Get all model nodes of each type and assign the model to all of them
+        // Get all single-model nodes of each type and assign the model to all of them
         auto vertexDataNodes = pipelineEditor->getAllVertexDataNodes();
         auto uboNodes = pipelineEditor->getAllUBONodes();
         auto materialNodes = pipelineEditor->getAllMaterialNodes();
 
-        size_t totalAssigned = 0;
+        // Get all multi-model nodes
+        auto multiVertexDataNodes = pipelineEditor->getAllMultiVertexDataNodes();
+        auto multiUBONodes = pipelineEditor->getAllMultiUBONodes();
+        auto multiMaterialNodes = pipelineEditor->getAllMultiMaterialNodes();
 
+        size_t totalAssigned = 0;
+        size_t totalAdded = 0;
+
+        // Assign to single-model nodes (replaces existing model)
         for (auto* node : vertexDataNodes) {
             node->setModel(handle);
             ++totalAssigned;
@@ -80,6 +90,20 @@ Editor::Editor(
             ++totalAssigned;
         }
 
+        // Add to multi-model nodes (adds to list)
+        for (auto* node : multiVertexDataNodes) {
+            node->addModel(handle);
+            ++totalAdded;
+        }
+        for (auto* node : multiUBONodes) {
+            node->addModel(handle);
+            ++totalAdded;
+        }
+        for (auto* node : multiMaterialNodes) {
+            node->addModel(handle);
+            ++totalAdded;
+        }
+
         // Clean up stale links from UBO nodes whose camera/light pins are no longer valid
         for (auto* node : uboNodes) {
             for (auto pinId : node->getPinsToUnlink()) {
@@ -87,10 +111,16 @@ Editor::Editor(
             }
         }
 
-        if (totalAssigned > 0) {
-            Log::info("Editor", "Assigned model to {} model node(s)", totalAssigned);
+        if (totalAssigned > 0 || totalAdded > 0) {
+            if (totalAssigned > 0 && totalAdded > 0) {
+                Log::info("Editor", "Assigned model to {} node(s), added to {} multi-model node(s)", totalAssigned, totalAdded);
+            } else if (totalAssigned > 0) {
+                Log::info("Editor", "Assigned model to {} model node(s)", totalAssigned);
+            } else {
+                Log::info("Editor", "Added model to {} multi-model node(s)", totalAdded);
+            }
         } else {
-            Log::warning("Editor", "No model nodes in graph - add VertexData, UBO, or Material nodes first");
+            Log::warning("Editor", "No model nodes in graph - add VertexData, UBO, Material, or Multi-Model nodes first");
         }
     });
 }

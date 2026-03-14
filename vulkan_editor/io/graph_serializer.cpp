@@ -10,6 +10,10 @@
 #include "../graph/present_node.h"
 #include "../graph/ubo_node.h"
 #include "../graph/vertex_data_node.h"
+#include "../graph/multi_model_node_base.h"
+#include "../graph/multi_vertex_data_node.h"
+#include "../graph/multi_ubo_node.h"
+#include "../graph/multi_material_node.h"
 #include "../shader/shader_manager.h"
 #include "../util/logger.h"
 #include <fstream>
@@ -339,6 +343,102 @@ std::unique_ptr<Node> NodeFactory::createFromJson(
         auto lightNode = std::make_unique<LightNode>(id);
         lightNode->fromJson(jNode);
         node = std::move(lightNode);
+
+    } else if (type == "multi_vertex_data") {
+        auto multiVertexNode = std::make_unique<MultiVertexDataNode>(id);
+        multiVertexNode->fromJson(jNode);
+
+        // Load all models via ModelManager
+        // Collect entries first, then clear and re-add with loaded handles
+        namespace fs = std::filesystem;
+        std::vector<std::pair<std::string, bool>> entriesToLoad;
+        for (size_t i = 0; i < multiVertexNode->getModelCount(); ++i) {
+            const ModelEntry& entry = multiVertexNode->getModel(i);
+            if (entry.path[0] != '\0') {
+                entriesToLoad.emplace_back(entry.path, entry.enabled);
+            }
+        }
+        // Clear all placeholder entries
+        while (multiVertexNode->getModelCount() > 0) {
+            multiVertexNode->removeModel(0);
+        }
+        // Load and add models
+        for (const auto& [path, enabled] : entriesToLoad) {
+            ModelHandle handle = g_modelManager->loadModel(fs::path(path));
+            if (g_modelManager->isLoaded(handle)) {
+                multiVertexNode->addModel(handle);
+                multiVertexNode->setModelEnabled(
+                    multiVertexNode->getModelCount() - 1, enabled);
+            }
+        }
+
+        node = std::move(multiVertexNode);
+
+    } else if (type == "multi_ubo") {
+        auto multiUboNode = std::make_unique<MultiUBONode>(id);
+        multiUboNode->fromJson(jNode);
+
+        // Store camera selection
+        int savedCameraIndex = multiUboNode->selectedCameraIndex;
+
+        // Load all models via ModelManager
+        // Collect entries first, then clear and re-add with loaded handles
+        namespace fs = std::filesystem;
+        std::vector<std::pair<std::string, bool>> entriesToLoad;
+        for (size_t i = 0; i < multiUboNode->getModelCount(); ++i) {
+            const ModelEntry& entry = multiUboNode->getModel(i);
+            if (entry.path[0] != '\0') {
+                entriesToLoad.emplace_back(entry.path, entry.enabled);
+            }
+        }
+        // Clear all placeholder entries
+        while (multiUboNode->getModelCount() > 0) {
+            multiUboNode->removeModel(0);
+        }
+        // Load and add models
+        for (const auto& [path, enabled] : entriesToLoad) {
+            ModelHandle handle = g_modelManager->loadModel(fs::path(path));
+            if (g_modelManager->isLoaded(handle)) {
+                multiUboNode->addModel(handle);
+                multiUboNode->setModelEnabled(
+                    multiUboNode->getModelCount() - 1, enabled);
+            }
+        }
+
+        // Restore selection
+        multiUboNode->selectedCameraIndex = savedCameraIndex;
+
+        node = std::move(multiUboNode);
+
+    } else if (type == "multi_material") {
+        auto multiMaterialNode = std::make_unique<MultiMaterialNode>(id);
+        multiMaterialNode->fromJson(jNode);
+
+        // Load all models via ModelManager
+        // Collect entries first, then clear and re-add with loaded handles
+        namespace fs = std::filesystem;
+        std::vector<std::pair<std::string, bool>> entriesToLoad;
+        for (size_t i = 0; i < multiMaterialNode->getModelCount(); ++i) {
+            const ModelEntry& entry = multiMaterialNode->getModel(i);
+            if (entry.path[0] != '\0') {
+                entriesToLoad.emplace_back(entry.path, entry.enabled);
+            }
+        }
+        // Clear all placeholder entries
+        while (multiMaterialNode->getModelCount() > 0) {
+            multiMaterialNode->removeModel(0);
+        }
+        // Load and add models
+        for (const auto& [path, enabled] : entriesToLoad) {
+            ModelHandle handle = g_modelManager->loadModel(fs::path(path));
+            if (g_modelManager->isLoaded(handle)) {
+                multiMaterialNode->addModel(handle);
+                multiMaterialNode->setModelEnabled(
+                    multiMaterialNode->getModelCount() - 1, enabled);
+            }
+        }
+
+        node = std::move(multiMaterialNode);
 
     } else {
         Log::warning("NodeFactory", "Unknown node type: {}", type);
