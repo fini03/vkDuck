@@ -429,6 +429,12 @@ PipelineState::buildPinIdMap(NodeGraph& graph) const {
                 pinIdMap[pipeline->lightInput.pin.id.Get()] =
                     &pipeline->lightInput.pin;
             }
+            // Add attachment input pins (for shared render pass support)
+            for (auto& attIn : pipeline->attachmentInputs) {
+                if (attIn.pin.id.Get() != 0) {
+                    pinIdMap[attIn.pin.id.Get()] = &attIn.pin;
+                }
+            }
         // ModelNode removed - deprecated
         } else if (auto* vertexData =
                        dynamic_cast<VertexDataNode*>(node.get())) {

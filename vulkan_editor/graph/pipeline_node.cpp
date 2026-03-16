@@ -237,6 +237,18 @@ nlohmann::json PipelineNode::toJson() const {
         );
     }
 
+    // Store attachment input pins (for shared render pass support)
+    for (const auto& attIn : attachmentInputs) {
+        if (attIn.pin.id.Get() != 0) {
+            j["extraPins"].push_back(
+                {{"id", attIn.pin.id.Get()},
+                 {"type", static_cast<int>(attIn.pin.type)},
+                 {"label", attIn.pin.label},
+                 {"pinKind", "attachmentInput"}}
+            );
+        }
+    }
+
     // Store attachment configs
     j["attachmentConfigs"] = nlohmann::json::array();
     for (const auto& config : shaderReflection.attachmentConfigs) {
@@ -331,6 +343,18 @@ void PipelineNode::restorePinIds(
             Log::debug(
                 "PipelineNode", "Restored lightInput pin '{}' = {}",
                 lightInput.pin.label, lightIt->second
+            );
+        }
+    }
+
+    // Restore attachment input pin IDs by label
+    for (auto& attIn : attachmentInputs) {
+        auto attIt = inputPinIds.find(attIn.pin.label);
+        if (attIt != inputPinIds.end()) {
+            attIn.pin.id = ed::PinId(attIt->second);
+            Log::debug(
+                "PipelineNode", "Restored attachmentInput pin '{}' = {}",
+                attIn.pin.label, attIt->second
             );
         }
     }
