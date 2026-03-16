@@ -590,6 +590,18 @@ bool PipelineState::load(
             int loadMaxId = maxId;
             deserializeNodes(j["nodes"], graph, shader_manager, loadMaxId);
 
+            // Set graph reference for multi-model consumer nodes
+            // (needed for finding source node during createPrimitives)
+            for (auto& node : graph.nodes) {
+                if (auto* multiVertex = dynamic_cast<MultiVertexDataNode*>(node.get())) {
+                    multiVertex->setGraph(&graph);
+                } else if (auto* multiUbo = dynamic_cast<MultiUBONode*>(node.get())) {
+                    multiUbo->setGraph(&graph);
+                } else if (auto* multiMaterial = dynamic_cast<MultiMaterialNode*>(node.get())) {
+                    multiMaterial->setGraph(&graph);
+                }
+            }
+
             // Register all nodes' pins with the central registry
             Log::debug(
                 "PipelineState", "Registering pins for {} nodes...",

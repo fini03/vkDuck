@@ -118,6 +118,19 @@ void PipelineNode::registerPins(PinRegistry& registry) {
         }
     }
 
+    // Register attachment input pins (for shared render pass support)
+    for (auto& attIn : attachmentInputs) {
+        if (attIn.pin.id.Get() != 0) {
+            attIn.pinHandle = registry.registerPinWithId(
+                id,
+                attIn.pin.id,
+                attIn.pin.type,
+                PinKind::Input,
+                attIn.pin.label
+            );
+        }
+    }
+
     // Register camera input pin if detected
     if (hasCameraInput && cameraInput.pin.id.Get() != 0) {
         cameraInput.pinHandle = registry.registerPinWithId(
@@ -154,6 +167,9 @@ void PipelineNode::reregisterPins(PinRegistry& registry) {
     }
     for (auto& config : shaderReflection.attachmentConfigs) {
         config.pinHandle = INVALID_PIN_HANDLE;
+    }
+    for (auto& attIn : attachmentInputs) {
+        attIn.pinHandle = INVALID_PIN_HANDLE;
     }
     cameraInput.pinHandle = INVALID_PIN_HANDLE;
     lightInput.pinHandle = INVALID_PIN_HANDLE;
@@ -362,6 +378,11 @@ void PipelineNode::render(
         pinLabels.push_back(config.pin.label);
     }
 
+    // Attachment input pins (for shared render pass)
+    for (const auto& attIn : attachmentInputs) {
+        pinLabels.push_back(attIn.pin.label);
+    }
+
     float nodeWidth = CalculateNodeWidth(name, pinLabels);
 
     // Violet background for all nodes (semi-transparent)
@@ -415,6 +436,15 @@ void PipelineNode::render(
             binding.pin.id, binding.pin.label,
             static_cast<int>(binding.pin.type),
             graph.isPinLinked(binding.pin.id), nodeWidth, builder
+        );
+    }
+
+    // Draw attachment input pins (for shared render pass support)
+    for (const auto& attIn : attachmentInputs) {
+        DrawInputPin(
+            attIn.pin.id, attIn.pin.label,
+            static_cast<int>(attIn.pin.type),
+            graph.isPinLinked(attIn.pin.id), nodeWidth, builder
         );
     }
 
@@ -745,6 +775,42 @@ void PipelineNode::reconcilePins(
                 pin.label, pin.id.Get()
             );
         }
+    }
+
+    // Also harvest old attachment input pins
+    for (const auto& attIn : attachmentInputs) {
+        if (attIn.pin.id.Get() != 0) {
+            oldPins[attIn.pin.label] = attIn.pin;
+        }
+    }
+
+    // Create attachment INPUT pins for each attachment output (for shared render pass support)
+    // This allows another pipeline's attachments to be connected as inputs
+    attachmentInputs.clear();
+    for (const auto& config : shaderReflection.attachmentConfigs) {
+        AttachmentInput attIn;
+        attIn.correspondingOutput = config.name;
+        std::string inputLabel = config.name + " (in)";
+        attIn.pin.label = inputLabel;
+        attIn.pin.type = PinType::Image;
+
+        // Check if we have an existing pin with the same label
+        auto it = oldPins.find(inputLabel);
+        if (it != oldPins.end() && it->second.type == PinType::Image) {
+            attIn.pin.id = it->second.id;
+            Log::debug(
+                "Pipeline", "Reusing attachment input pin ID for {} (ID: {})",
+                inputLabel, attIn.pin.id.Get()
+            );
+        } else {
+            attIn.pin.id = ed::PinId(Node::GetNextGlobalId());
+            Log::debug(
+                "Pipeline", "Creating new attachment input pin ID for {} (ID: {})",
+                inputLabel, attIn.pin.id.Get()
+            );
+        }
+
+        attachmentInputs.push_back(attIn);
     }
 
     // Remove all links where either pin no longer exists
@@ -1210,76 +1276,79 @@ void PipelineNode::createPrimitives(primitives::Store& store) {
     bool useMSAA = (sampleCount > VK_SAMPLE_COUNT_1_BIT);
 
     // Generate all attachments based on shader outputs
-    for (auto& config : shaderReflection.attachmentConfigs) {
-        // Skip if handle is already valid (e.g., from a previous failed
-        // reload)
-        if (config.handle.isValid()) {
-            Log::warning(
-                "Pipeline",
-                "Attachment config '{}' already has a valid handle, "
-                "skipping",
-                config.semantic
-            );
-            continue;
-        }
+    // Skip if using shared render pass (will use source pipeline's attachments)
+    if (!usesSharedRenderPass) {
+        for (auto& config : shaderReflection.attachmentConfigs) {
+            // Skip if handle is already valid (e.g., from a previous failed
+            // reload)
+            if (config.handle.isValid()) {
+                Log::warning(
+                    "Pipeline",
+                    "Attachment config '{}' already has a valid handle, "
+                    "skipping",
+                    config.semantic
+                );
+                continue;
+            }
 
-        primitives::StoreHandle hImageArray = store.newArray();
-        primitives::StoreHandle hImage = store.newImage();
-        store.arrays[hImageArray.handle].type = primitives::Type::Image;
-        store.arrays[hImageArray.handle].handles = {hImage.handle};
-        primitives::Image& image = store.images[hImage.handle];
+            primitives::StoreHandle hImageArray = store.newArray();
+            primitives::StoreHandle hImage = store.newImage();
+            store.arrays[hImageArray.handle].type = primitives::Type::Image;
+            store.arrays[hImageArray.handle].handles = {hImage.handle};
+            primitives::Image& image = store.images[hImage.handle];
 
-        image.imageInfo.format = config.format;
-        image.imageInfo.extent.width = settings.extentConfig.width;
-        image.imageInfo.extent.height = settings.extentConfig.height;
-        image.imageInfo.extent.depth = 1;
-        image.extentType = settings.extentConfig.type;
-        image.imageInfo.samples = sampleCount;  // Set sample count
+            image.imageInfo.format = config.format;
+            image.imageInfo.extent.width = settings.extentConfig.width;
+            image.imageInfo.extent.height = settings.extentConfig.height;
+            image.imageInfo.extent.depth = 1;
+            image.extentType = settings.extentConfig.type;
+            image.imageInfo.samples = sampleCount;  // Set sample count
 
-        primitives::StoreHandle hAttachment = store.newAttachment();
-        primitives::Attachment& attachment =
-            store.attachments[hAttachment.handle];
-        attachment.image = hImage;
-        attachment.desc.samples = sampleCount;  // Match sample count
-        attachment.colorBlending = config.colorBlending;
-        attachment.clearValue = config.clearValue;
+            primitives::StoreHandle hAttachment = store.newAttachment();
+            primitives::Attachment& attachment =
+                store.attachments[hAttachment.handle];
+            attachment.image = hImage;
+            attachment.desc.samples = sampleCount;  // Match sample count
+            attachment.colorBlending = config.colorBlending;
+            attachment.clearValue = config.clearValue;
 
-        if (config.semantic == "SV_DEPTH") {
-            image.imageInfo.usage |=
-                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-            image.viewInfo.subresourceRange.aspectMask =
-                VK_IMAGE_ASPECT_DEPTH_BIT;
-        } else {
-            image.imageInfo.usage |=
-                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-            image.viewInfo.subresourceRange.aspectMask =
-                VK_IMAGE_ASPECT_COLOR_BIT;
-
-            // Create single-sample resolve image for multisampled color attachments
-            if (useMSAA) {
-                primitives::StoreHandle hResolveImage = store.newImage();
-                primitives::Image& resolveImage = store.images[hResolveImage.handle];
-
-                resolveImage.imageInfo.format = config.format;
-                resolveImage.imageInfo.extent = image.imageInfo.extent;
-                resolveImage.extentType = settings.extentConfig.type;
-                resolveImage.imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-                resolveImage.imageInfo.usage =
-                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                    VK_IMAGE_USAGE_SAMPLED_BIT;
-                resolveImage.viewInfo.subresourceRange.aspectMask =
+            if (config.semantic == "SV_DEPTH") {
+                image.imageInfo.usage |=
+                    VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+                image.viewInfo.subresourceRange.aspectMask =
+                    VK_IMAGE_ASPECT_DEPTH_BIT;
+            } else {
+                image.imageInfo.usage |=
+                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+                image.viewInfo.subresourceRange.aspectMask =
                     VK_IMAGE_ASPECT_COLOR_BIT;
 
-                attachment.resolveImage = hResolveImage;
+                // Create single-sample resolve image for multisampled color attachments
+                if (useMSAA) {
+                    primitives::StoreHandle hResolveImage = store.newImage();
+                    primitives::Image& resolveImage = store.images[hResolveImage.handle];
 
-                // Replace array with resolve image as output (MSAA image is internal)
-                // Other nodes should sample from the resolved single-sample image
-                store.arrays[hImageArray.handle].handles = {hResolveImage.handle};
+                    resolveImage.imageInfo.format = config.format;
+                    resolveImage.imageInfo.extent = image.imageInfo.extent;
+                    resolveImage.extentType = settings.extentConfig.type;
+                    resolveImage.imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+                    resolveImage.imageInfo.usage =
+                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                        VK_IMAGE_USAGE_SAMPLED_BIT;
+                    resolveImage.viewInfo.subresourceRange.aspectMask =
+                        VK_IMAGE_ASPECT_COLOR_BIT;
+
+                    attachment.resolveImage = hResolveImage;
+
+                    // Replace array with resolve image as output (MSAA image is internal)
+                    // Other nodes should sample from the resolved single-sample image
+                    store.arrays[hImageArray.handle].handles = {hResolveImage.handle};
+                }
             }
-        }
 
-        config.handle = hImageArray;
-        renderPassAttachments.push_back(hAttachment);
+            config.handle = hImageArray;
+            renderPassAttachments.push_back(hAttachment);
+        }
     }
 
     // Check if shader already specifies depth output
@@ -1293,7 +1362,7 @@ void PipelineNode::createPrimitives(primitives::Store& store) {
 
     // Create depth attachment if user enabled it and shader doesn't
     // already have one
-    if (settings.depthEnabled && !shaderHasDepth) {
+    if (settings.depthEnabled && !shaderHasDepth && !usesSharedRenderPass) {
         primitives::StoreHandle hImageArray = store.newArray();
         primitives::StoreHandle hImage = store.newImage();
         store.arrays[hImageArray.handle].type = primitives::Type::Image;
@@ -1328,9 +1397,14 @@ void PipelineNode::createPrimitives(primitives::Store& store) {
         );
     }
 
-    primitives::StoreHandle renderPass = store.newRenderPass();
-    store.renderPasses[renderPass.handle].attachments =
-        renderPassAttachments;
+    // Create render pass only if we own it (not sharing another pipeline's render pass)
+    primitives::StoreHandle renderPass;
+    if (!usesSharedRenderPass) {
+        renderPass = store.newRenderPass();
+        store.renderPasses[renderPass.handle].attachments =
+            renderPassAttachments;
+    }
+    // If usesSharedRenderPass, renderPass remains invalid - will be set via connectLink
 
     primitives::StoreHandle hVertexShader = store.newShader();
     auto& vertexShader = store.shaders[hVertexShader.handle];
@@ -1363,6 +1437,11 @@ void PipelineNode::createPrimitives(primitives::Store& store) {
     pipelineHandle = hPipeline;
     pipeline.renderPass = renderPass;
     pipeline.shaders = {hVertexShader, hFragmentShader};
+
+    // If using shared render pass, this pipeline doesn't begin the render pass
+    if (usesSharedRenderPass) {
+        pipeline.beginsRenderPass = false;
+    }
 
     // pipeline.inputAssembly.topology =
     //     ModelNode::topologyOptionsEnum[settings.inputAssembly];
@@ -1506,15 +1585,34 @@ void PipelineNode::getOutputPrimitives(
         ax::NodeEditor::PinId,
         primitives::StoreHandle>>& outputs
 ) const {
-    for (const auto& config : shaderReflection.attachmentConfigs) {
-        // Skip invalid handles (can occur if shader compilation failed)
+    // If using shared render pass, use received attachment handles for passthrough
+    const primitives::Pipeline* pipeline = pipelineHandle.isValid()
+        ? &store.pipelines[pipelineHandle.handle]
+        : nullptr;
+
+    for (size_t i = 0; i < shaderReflection.attachmentConfigs.size(); ++i) {
+        const auto& config = shaderReflection.attachmentConfigs[i];
+
+        // Check if we have a received attachment handle (from shared render pass input)
+        if (pipeline && i < pipeline->receivedAttachmentHandles.size() &&
+            pipeline->receivedAttachmentHandles[i].isValid()) {
+            // Use the passthrough handle from the source pipeline
+            outputs.push_back({config.pin.id, pipeline->receivedAttachmentHandles[i]});
+            continue;
+        }
+
+        // Skip invalid handles (can occur if shader compilation failed or using shared render pass)
         if (!config.handle.isValid()) {
-            Log::warning(
-                "Pipeline",
-                "Skipping output '{}' with invalid handle in pipeline "
-                "'{}'",
-                config.semantic, name
-            );
+            // Only warn if NOT using shared render pass - for shared render pass,
+            // invalid handles are expected and the editor handles passthrough separately
+            if (!usesSharedRenderPass) {
+                Log::warning(
+                    "Pipeline",
+                    "Skipping output '{}' with invalid handle in pipeline "
+                    "'{}'",
+                    config.semantic, name
+                );
+            }
             continue;
         }
         if (config.handle.type != primitives::Type::Array) {
@@ -1621,4 +1719,24 @@ void PipelineNode::getInputPrimitives(
         }
         inputs.push_back({binding.pin.id, binding.descriptorSetSlot});
     }
+
+    // Handle attachment inputs (for shared render pass support)
+    // Slot 0 = vertex data, slot 1+ = attachment inputs
+    uint32_t attachmentSlot = 1;
+    for (const auto& attIn : attachmentInputs) {
+        primitives::LinkSlot slot{
+            .handle = pipelineHandle,
+            .slot = attachmentSlot++
+        };
+        inputs.push_back({attIn.pin.id, slot});
+    }
+}
+
+bool PipelineNode::hasConnectedAttachmentInputs(const NodeGraph& graph) const {
+    for (const auto& attIn : attachmentInputs) {
+        if (graph.isPinLinked(attIn.pin.id)) {
+            return true;
+        }
+    }
+    return false;
 }

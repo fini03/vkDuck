@@ -181,6 +181,12 @@ PinLookupResult NodeGraph::findPin(ax::NodeEditor::PinId id) {
                     NodePinKind::Input
                 };
             }
+
+            // Check attachment input pins (for shared render pass)
+            for (auto& attIn : pipeline->attachmentInputs) {
+                if (attIn.pin.id == id)
+                    return {pipeline, &attIn.pin, NodePinKind::Input};
+            }
         }
 
         // --- Handle PresentNode ---
@@ -373,6 +379,13 @@ void NodeGraph::buildDependencies() {
             if (pipeline->hasLightInput &&
                 pipeline->lightInput.pin.id.Get() != 0) {
                 pinInfo[pipeline->lightInput.pin.id] = node;
+            }
+
+            // Attachment input pins (for shared render pass chaining)
+            for (const auto& attIn : pipeline->attachmentInputs) {
+                if (attIn.pin.id.Get() != 0) {
+                    pinInfo[attIn.pin.id] = node;
+                }
             }
         }
     }

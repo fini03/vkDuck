@@ -592,6 +592,12 @@ public:
     StoreHandle renderPass{};
     StoreHandle vertexDataHandle{};
 
+    // Render pass sharing - allows multiple pipelines to render in the same pass
+    bool beginsRenderPass = true;   // True if this pipeline should call vkCmdBeginRenderPass
+    bool endsRenderPass = true;     // True if this pipeline should call vkCmdEndRenderPass
+    StoreHandle sharedRenderPass{}; // If set, use this render pass instead of own (from source pipeline)
+    std::vector<StoreHandle> receivedAttachmentHandles{}; // Attachment handles received via input pins (for passthrough output)
+
     bool create(
         const Store& store,
         VkDevice device,

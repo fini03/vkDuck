@@ -142,6 +142,15 @@ public:
         PinHandle pinHandle = INVALID_PIN_HANDLE;
     };
 
+    /// Attachment input for shared render pass support.
+    /// Allows this pipeline to continue rendering into another pipeline's attachments.
+    struct AttachmentInput {
+        Pin pin;
+        PinHandle pinHandle = INVALID_PIN_HANDLE;
+        std::string correspondingOutput;  // Name of the output attachment this input maps to
+    };
+    std::vector<AttachmentInput> attachmentInputs;
+
     bool hasCameraInput{false};
     DetectedCamera cameraInput;
 
@@ -168,6 +177,14 @@ public:
 
     primitives::StoreHandle pipelineHandle{};
     primitives::StoreHandle depthAttachmentHandle{};
+
+    /// Returns true if any attachment input pin is connected.
+    /// Used to determine render pass ownership (if true, this pipeline continues another's render pass).
+    bool hasConnectedAttachmentInputs(const NodeGraph& graph) const;
+
+    /// Flag set by editor before createPrimitives() to indicate attachment inputs are connected.
+    /// When true, this pipeline should not create its own render pass (will share another's).
+    bool usesSharedRenderPass = false;
 
 protected:
     std::string getColorWriteMaskString(uint32_t mask) const;

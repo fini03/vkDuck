@@ -9,6 +9,8 @@
 #include "graph/material_node.h"
 // #include "graph/model_node.h"  // DEPRECATED
 #include "graph/node_graph.h"
+#include "graph/pipeline_node.h"
+#include "graph/present_node.h"
 #include "graph/ubo_node.h"
 #include "graph/vertex_data_node.h"
 #include "graph/multi_model_source_node.h"
@@ -121,6 +123,11 @@ void Editor::rebuildLiveViewPrimitives() {
 
     try {
         auto& store = liveView.getStore();
+
+        // Clean up any stale links where either pin no longer exists
+        // (e.g., when a pipeline node is removed but links to its pins remain)
+        graph->removeInvalidLinks();
+
         graph->buildDependencies();
         auto sortedNodes = graph->topologicalSort();
 
@@ -155,6 +162,17 @@ void Editor::rebuildLiveViewPrimitives() {
         liveView.destroyOut();
         store.reset();
 
+        // Before creating primitives, determine which pipelines use shared render pass
+        // (have attachment input pins connected)
+        for (auto node : sortedNodes) {
+            if (auto* pipelineNode = dynamic_cast<PipelineNode*>(node)) {
+                pipelineNode->usesSharedRenderPass = pipelineNode->hasConnectedAttachmentInputs(*graph);
+                if (pipelineNode->usesSharedRenderPass) {
+                    Log::debug("LiveView", "Pipeline '{}' will use shared render pass", pipelineNode->name);
+                }
+            }
+        }
+
         std::vector<std::pair<PinId, StoreHandle>> outputs;
         std::vector<std::pair<PinId, LinkSlot>> inputs;
         for (auto node : sortedNodes) {
@@ -169,6 +187,42 @@ void Editor::rebuildLiveViewPrimitives() {
         std::unordered_map<PinId, LinkSlot> inputMap{
             inputs.begin(), inputs.end()
         };
+
+        // Handle shared render pass pipelines: their output pins should pass through
+        // the handles from their connected input pins (attachment passthrough)
+        for (auto node : sortedNodes) {
+            auto* pipelineNode = dynamic_cast<PipelineNode*>(node);
+            if (!pipelineNode || !pipelineNode->usesSharedRenderPass) continue;
+
+            // For each attachment input pin, find what's connected and use that
+            // handle for the corresponding output pin
+            for (size_t i = 0; i < pipelineNode->attachmentInputs.size(); ++i) {
+                const auto& attIn = pipelineNode->attachmentInputs[i];
+
+                // Find the link connected to this input pin
+                for (const auto& link : graph->links) {
+                    if (link.endPin == attIn.pin.id) {
+                        // Found the link - get the source output handle
+                        auto itSource = outputMap.find(link.startPin);
+                        if (itSource != outputMap.end()) {
+                            // Find the corresponding output pin for this attachment
+                            if (i < pipelineNode->shaderReflection.attachmentConfigs.size()) {
+                                const auto& config = pipelineNode->shaderReflection.attachmentConfigs[i];
+                                // Add/update the output map with the passthrough handle
+                                outputMap[config.pin.id] = itSource->second;
+                                Log::debug(
+                                    "LiveView",
+                                    "Pipeline '{}': passthrough attachment {} -> {}",
+                                    pipelineNode->name, attIn.pin.label, config.pin.label
+                                );
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
         std::vector<std::pair<StoreHandle, LinkSlot>> links;
         links.reserve(graph->links.size());
 
@@ -259,6 +313,41 @@ void Editor::rebuildLiveViewPrimitives() {
                 "Not updating live view, could not connect node primitives"
             );
         } else {
+            // Determine which pipelines should end their render pass
+            // Default: all pipelines end their render pass
+            // If a pipeline's attachment output connects to another pipeline's attachment input,
+            // that pipeline should NOT end the render pass
+            for (auto node : sortedNodes) {
+                auto* pipelineNode = dynamic_cast<PipelineNode*>(node);
+                if (!pipelineNode || !pipelineNode->pipelineHandle.isValid()) continue;
+
+                auto& pipeline = store.pipelines[pipelineNode->pipelineHandle.handle];
+
+                // Check if any attachment output connects to another pipeline's attachment input
+                for (const auto& config : pipelineNode->shaderReflection.attachmentConfigs) {
+                    for (const auto& link : graph->links) {
+                        if (link.startPin != config.pin.id) continue;
+
+                        // Check if the end pin is an attachment input on another pipeline
+                        auto endPinInfo = graph->findPin(link.endPin);
+                        if (auto* targetPipeline = dynamic_cast<PipelineNode*>(endPinInfo.node)) {
+                            // Check if this is an attachment input pin
+                            for (const auto& attIn : targetPipeline->attachmentInputs) {
+                                if (link.endPin == attIn.pin.id) {
+                                    // This pipeline's output goes to another pipeline's attachment input
+                                    // Don't end the render pass
+                                    pipeline.endsRenderPass = false;
+                                    Log::debug("LiveView",
+                                        "Pipeline '{}' will NOT end render pass (continues to '{}')",
+                                        pipelineNode->name, targetPipeline->name);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             store.link();
 
             liveView.orderedPrimitives = store.getNodes();

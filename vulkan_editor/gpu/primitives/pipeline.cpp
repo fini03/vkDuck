@@ -67,7 +67,10 @@ bool Pipeline::create(
     VkDevice device,
     VmaAllocator allocator
 ) {
-    if (!renderPass.isValid()) {
+    // Use shared render pass if this pipeline continues another's render pass
+    StoreHandle effectiveRenderPass = sharedRenderPass.isValid() ? sharedRenderPass : renderPass;
+
+    if (!effectiveRenderPass.isValid()) {
         Log::error("Pipeline", "Invalid render pass handle");
         return false;
     }
@@ -75,7 +78,7 @@ bool Pipeline::create(
         Log::error("Pipeline", "No shaders");
         return false;
     }
-    const RenderPass& rp = store.renderPasses[renderPass.handle];
+    const RenderPass& rp = store.renderPasses[effectiveRenderPass.handle];
 
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
     shaderStages.reserve(shaders.size());
@@ -316,7 +319,10 @@ void Pipeline::recordCommands(
     const Store& store,
     VkCommandBuffer cmdBuffer
 ) const {
-    if (!renderPass.isValid()) {
+    // Use shared render pass if this pipeline continues another's render pass
+    StoreHandle effectiveRenderPass = sharedRenderPass.isValid() ? sharedRenderPass : renderPass;
+
+    if (!effectiveRenderPass.isValid()) {
         Log::warning("Pipeline", "Skipping render: invalid render pass handle");
         return;
     }
@@ -340,19 +346,22 @@ void Pipeline::recordCommands(
         }
     }
 
-    const RenderPass& rp = store.renderPasses[renderPass.handle];
+    const RenderPass& rp = store.renderPasses[effectiveRenderPass.handle];
 
-    VkRenderPassBeginInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    renderPassInfo.renderPass = rp.renderPass;
-    renderPassInfo.framebuffer = rp.framebuffer;
-    renderPassInfo.renderArea = rp.renderArea;
-    renderPassInfo.clearValueCount = rp.clearValues.size();
-    renderPassInfo.pClearValues = rp.clearValues.data();
+    // Only begin render pass if this pipeline owns it (not continuing another's)
+    if (beginsRenderPass) {
+        VkRenderPassBeginInfo renderPassInfo{};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        renderPassInfo.renderPass = rp.renderPass;
+        renderPassInfo.framebuffer = rp.framebuffer;
+        renderPassInfo.renderArea = rp.renderArea;
+        renderPassInfo.clearValueCount = rp.clearValues.size();
+        renderPassInfo.pClearValues = rp.clearValues.data();
 
-    vkCmdBeginRenderPass(
-        cmdBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE
-    );
+        vkCmdBeginRenderPass(
+            cmdBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE
+        );
+    }
 
     if (!globalDescriptorSets.empty()) {
         vkCmdBindDescriptorSets(
@@ -384,19 +393,25 @@ void Pipeline::recordCommands(
 
     if (!vertexDataHandle.isValid()) {
         vkCmdDraw(cmdBuffer, 3, 1, 0, 0);
-        vkCmdEndRenderPass(cmdBuffer);
+        if (endsRenderPass) {
+            vkCmdEndRenderPass(cmdBuffer);
+        }
         return;
     }
 
     if (vertexDataHandle.type != Type::Array) {
         Log::warning("Pipeline", "Skipping render: vertex data handle is not an array");
-        vkCmdEndRenderPass(cmdBuffer);
+        if (endsRenderPass) {
+            vkCmdEndRenderPass(cmdBuffer);
+        }
         return;
     }
     const Array& vertexArray = store.arrays[vertexDataHandle.handle];
     if (vertexArray.type != Type::VertexData) {
         Log::warning("Pipeline", "Skipping render: vertex array is not VertexData type");
-        vkCmdEndRenderPass(cmdBuffer);
+        if (endsRenderPass) {
+            vkCmdEndRenderPass(cmdBuffer);
+        }
         return;
     }
     auto vertices =
@@ -435,7 +450,9 @@ void Pipeline::recordCommands(
                 "Pipeline",
                 "Skipping render: per-object descriptor sets count mismatch"
             );
-            vkCmdEndRenderPass(cmdBuffer);
+            if (endsRenderPass) {
+                vkCmdEndRenderPass(cmdBuffer);
+            }
             return;
         }
         auto combinedGeometry =
@@ -473,7 +490,10 @@ void Pipeline::recordCommands(
         }
     }
 
-    vkCmdEndRenderPass(cmdBuffer);
+    // Only end render pass if this pipeline is the final one in the chain
+    if (endsRenderPass) {
+        vkCmdEndRenderPass(cmdBuffer);
+    }
 }
 
 bool Pipeline::connectLink(
@@ -485,40 +505,95 @@ bool Pipeline::connectLink(
         return false;
     }
 
-    if (slot.slot != 0) {
-        Log::error(
-            "Primitives", "Pipeline: Invalid slot {}", slot.slot
+    // Slot 0 = vertex data
+    if (slot.slot == 0) {
+        if (slot.handle.type != Type::Array) {
+            Log::error("Primitives", "Pipeline: Expected array type for vertex data");
+            return false;
+        }
+
+        const Array& array = store.arrays[slot.handle.handle];
+        if (array.type != Type::VertexData) {
+            Log::error("Primitives", "Pipeline: Expected VertexData array");
+            return false;
+        }
+
+        if (array.handles.empty()) {
+            Log::error(
+                "Primitives", "Pipeline: Got empty vertex data array"
+            );
+            return false;
+        }
+
+        vertexDataHandle = slot.handle;
+
+        Log::debug(
+            "Primitives",
+            "Pipeline: Connected vertex data array with {} geometries",
+            array.handles.size()
         );
-        return false;
+
+        return true;
     }
 
+    // Slot 1+ = attachment inputs (for shared render pass)
     if (slot.handle.type != Type::Array) {
-        Log::error("Primitives", "Pipeline: Expected array type");
+        Log::error("Primitives", "Pipeline: Expected array type for attachment input");
         return false;
     }
 
     const Array& array = store.arrays[slot.handle.handle];
-    if (array.type != Type::VertexData) {
-        Log::error("Primitives", "Pipeline: Expected VertexData array");
+    if (array.type != Type::Image) {
+        Log::error("Primitives", "Pipeline: Expected Image array for attachment input");
         return false;
     }
 
-    if (array.handles.empty()) {
-        Log::error(
-            "Primitives", "Pipeline: Got empty vertex data array"
-        );
-        return false;
+    // Store the received attachment handle for passthrough output
+    // Slot 1 = first attachment, so index = slot - 1
+    uint32_t attachmentIndex = slot.slot - 1;
+    if (attachmentIndex >= receivedAttachmentHandles.size()) {
+        receivedAttachmentHandles.resize(attachmentIndex + 1);
     }
-
-    vertexDataHandle = slot.handle;
+    receivedAttachmentHandles[attachmentIndex] = slot.handle;
 
     Log::debug(
         "Primitives",
-        "Pipeline: Connected vertex data array with {} geometries",
-        array.handles.size()
+        "Pipeline: Stored attachment handle at index {} (slot {})",
+        attachmentIndex, slot.slot
     );
 
-    return true;
+    // Find which pipeline owns this attachment (has it in its render pass)
+    // We need to get the source pipeline's render pass for compatibility
+    for (uint32_t i = 0; i < store.pipelines.size(); ++i) {
+        const Pipeline& srcPipeline = store.pipelines[i];
+        if (!srcPipeline.renderPass.isValid()) continue;
+
+        const RenderPass& rp = store.renderPasses[srcPipeline.renderPass.handle];
+        for (const auto& attHandle : rp.attachments) {
+            const Attachment& att = store.attachments[attHandle.handle];
+            // Check if this attachment's image matches the input array's image
+            if (array.handles.empty()) continue;
+            if (att.image.handle == array.handles[0] ||
+                (att.resolveImage.isValid() && att.resolveImage.handle == array.handles[0])) {
+                // Found the source pipeline - use its render pass
+                sharedRenderPass = srcPipeline.renderPass;
+                beginsRenderPass = false;
+                Log::debug(
+                    "Primitives",
+                    "Pipeline: Sharing render pass from another pipeline (attachment input slot {})",
+                    slot.slot
+                );
+                return true;
+            }
+        }
+    }
+
+    Log::warning(
+        "Primitives",
+        "Pipeline: Could not find source render pass for attachment input slot {}",
+        slot.slot
+    );
+    return true; // Still allow connection even if we can't find source
 }
 
 // ============================================================================
@@ -1242,26 +1317,31 @@ void Pipeline::generateDestroy(const Store& store, std::ostream& out) const {
 
 void Pipeline::generateRecordCommands(const Store& store, std::ostream& out) const {
     assert(!name.empty());
-    assert(renderPass.isValid());
-    const auto& rp{store.renderPasses[renderPass.handle]};
+
+    // Use shared render pass if available, otherwise use own
+    StoreHandle effectiveRenderPass = sharedRenderPass.isValid() ? sharedRenderPass : renderPass;
+    assert(effectiveRenderPass.isValid());
+    const auto& rp{store.renderPasses[effectiveRenderPass.handle]};
 
     print(out, "    // Pipeline: {}\n", name);
     print(out, "    {{\n");
 
-    // Begin render pass
-    print(out,
-        "        VkRenderPassBeginInfo {0}_passInfo{{\n"
-        "            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,\n"
-        "            .renderPass = {1},\n"
-        "            .framebuffer = {2},\n"
-        "            .renderArea = {1}_renderArea,\n"
-        "            .clearValueCount = static_cast<uint32_t>({1}_clearValues.size()),\n"
-        "            .pClearValues = {1}_clearValues.data()\n"
-        "        }};\n\n"
-        "        vkCmdBeginRenderPass(cmdBuffer, &{0}_passInfo, VK_SUBPASS_CONTENTS_INLINE);\n\n",
-        name, rp.name,
-        rp.rendersToSwapchain(store) ? rp.name + "_framebuffers[imageInFlightIndex]" : rp.name + "_framebuffer"
-    );
+    // Begin render pass (only if this pipeline owns the render pass)
+    if (beginsRenderPass) {
+        print(out,
+            "        VkRenderPassBeginInfo {0}_passInfo{{\n"
+            "            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,\n"
+            "            .renderPass = {1},\n"
+            "            .framebuffer = {2},\n"
+            "            .renderArea = {1}_renderArea,\n"
+            "            .clearValueCount = static_cast<uint32_t>({1}_clearValues.size()),\n"
+            "            .pClearValues = {1}_clearValues.data()\n"
+            "        }};\n\n"
+            "        vkCmdBeginRenderPass(cmdBuffer, &{0}_passInfo, VK_SUBPASS_CONTENTS_INLINE);\n\n",
+            name, rp.name,
+            rp.rendersToSwapchain(store) ? rp.name + "_framebuffers[imageInFlightIndex]" : rp.name + "_framebuffer"
+        );
+    }
 
     // Set viewport (dynamic)
     print(out,
@@ -1375,7 +1455,10 @@ void Pipeline::generateRecordCommands(const Store& store, std::ostream& out) con
         print(out, "        vkCmdDraw(cmdBuffer, 3, 1, 0, 0);\n");
     }
 
-    print(out, "\n        vkCmdEndRenderPass(cmdBuffer);\n");
+    // End render pass (only if this pipeline ends the render pass)
+    if (endsRenderPass) {
+        print(out, "\n        vkCmdEndRenderPass(cmdBuffer);\n");
+    }
     print(out, "    }}\n");
 }
 
