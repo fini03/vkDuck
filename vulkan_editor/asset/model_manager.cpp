@@ -542,7 +542,8 @@ void ModelManager::unloadUnusedModels() {
 }
 
 void ModelManager::reloadModel(ModelHandle handle) {
-    std::lock_guard lock(mutex_);
+    // Use unique_lock to allow unlocking during I/O operations
+    std::unique_lock lock(mutex_);
 
     auto it = cache_.find(handle);
     if (it == cache_.end()) {
@@ -563,7 +564,23 @@ void ModelManager::reloadModel(ModelHandle handle) {
 
     model->status = ModelStatus::Loading;
 
-    if (loadModelInternal(*model)) {
+    // Release lock during I/O-heavy loadModelInternal to avoid blocking other threads
+    // Note: projectRoot_ is read-only after setProjectRoot(), so this is safe
+    lock.unlock();
+
+    bool loadSuccess = loadModelInternal(*model);
+
+    // Reacquire lock to update shared state
+    lock.lock();
+
+    // Verify model wasn't invalidated while we were loading
+    it = cache_.find(handle);
+    if (it == cache_.end()) {
+        Log::warning(LOG_CATEGORY, "Model was removed during reload");
+        return;
+    }
+
+    if (loadSuccess) {
         model->status = ModelStatus::Loaded;
         model->loadedAt = std::chrono::system_clock::now();
         model->lastAccessed = model->loadedAt;
@@ -577,9 +594,11 @@ void ModelManager::reloadModel(ModelHandle handle) {
 
         Log::info(LOG_CATEGORY, "Model reloaded successfully: {}", model->displayName);
 
-        // Notify listeners
-        if (reloadCallback_) {
-            reloadCallback_(handle);
+        // Notify listeners - release lock first to avoid deadlock in callbacks
+        ModelReloadCallback callback = reloadCallback_;
+        lock.unlock();
+        if (callback) {
+            callback(handle);
         }
     } else {
         model->status = ModelStatus::Error;

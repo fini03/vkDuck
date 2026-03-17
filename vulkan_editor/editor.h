@@ -42,7 +42,10 @@ public:
     );
     void start();
     void cleanup() {
-        liveView.~LiveView();
+        // LiveView cleanup is handled by its destructor when Editor is destroyed.
+        // Calling the destructor manually would cause double-destruction.
+        // If explicit cleanup is needed before destruction, LiveView should
+        // provide a separate cleanup() method.
     }
 
 private:

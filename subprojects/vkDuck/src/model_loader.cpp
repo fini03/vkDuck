@@ -501,7 +501,9 @@ void processLightNode(
 // Model loading implementation {{{
 
 ModelData loadModel(const std::string& path, const std::string& projectRoot) {
+#ifndef NDEBUG
     auto totalStart = std::chrono::high_resolution_clock::now();
+#endif
 
     tinygltf::Model model;
     tinygltf::TinyGLTF loader;
@@ -713,7 +715,8 @@ ModelData loadModel(const std::string& path, const std::string& projectRoot) {
         // Normal texture
         matData.normalTextureIndex = getTextureIndex(mat.normalTexture.index);
 
-        // Debug: log all PBR material values
+#ifndef NDEBUG
+        // Debug: log all PBR material values (only in debug builds)
         std::cout << "Material " << i << " '" << mat.name << "':\n"
             << "  Textures: baseColor=" << mat.pbrMetallicRoughness.baseColorTexture.index
             << ", metRough=" << mat.pbrMetallicRoughness.metallicRoughnessTexture.index
@@ -731,6 +734,7 @@ ModelData loadModel(const std::string& path, const std::string& projectRoot) {
             << mat.emissiveFactor[1] << ", "
             << mat.emissiveFactor[2] << "]\n"
             << std::endl;
+#endif
 
         // Legacy: store base color path for backwards compatibility
         if (matData.baseColorTextureIndex >= 0) {
@@ -747,6 +751,18 @@ ModelData loadModel(const std::string& path, const std::string& projectRoot) {
             totalVerts += geom.vertices.size();
             totalIndices += geom.indices.size();
         }
+
+        // Check for overflow before casting to uint32_t for Vulkan
+        constexpr size_t maxUint32 = static_cast<size_t>(UINT32_MAX);
+        if (totalVerts > maxUint32) {
+            throw std::runtime_error("Model has too many vertices (" +
+                std::to_string(totalVerts) + ") - exceeds uint32_t maximum");
+        }
+        if (totalIndices > maxUint32) {
+            throw std::runtime_error("Model has too many indices (" +
+                std::to_string(totalIndices) + ") - exceeds uint32_t maximum");
+        }
+
         result.vertices.reserve(totalVerts);
         result.indices.reserve(totalIndices);
         result.ranges.reserve(geometries.size());
@@ -756,12 +772,34 @@ ModelData loadModel(const std::string& path, const std::string& projectRoot) {
     uint32_t indexOffset = 0;
 
     for (const auto& geom : geometries) {
+        // Check individual geometry sizes before casting
+        if (geom.vertices.size() > UINT32_MAX) {
+            throw std::runtime_error("Geometry has too many vertices (" +
+                std::to_string(geom.vertices.size()) + ")");
+        }
+        if (geom.indices.size() > UINT32_MAX) {
+            throw std::runtime_error("Geometry has too many indices (" +
+                std::to_string(geom.indices.size()) + ")");
+        }
+
         GeometryRange range{};
         range.firstVertex = vertexOffset;
         range.vertexCount = static_cast<uint32_t>(geom.vertices.size());
         range.firstIndex = indexOffset;
         range.indexCount = static_cast<uint32_t>(geom.indices.size());
         range.materialIndex = geom.materialIndex;
+
+        // Check for offset overflow before incrementing
+        if (vertexOffset > UINT32_MAX - range.vertexCount) {
+            throw std::runtime_error("Vertex offset overflow at geometry with " +
+                std::to_string(range.vertexCount) + " vertices (current offset: " +
+                std::to_string(vertexOffset) + ")");
+        }
+        if (indexOffset > UINT32_MAX - range.indexCount) {
+            throw std::runtime_error("Index offset overflow at geometry with " +
+                std::to_string(range.indexCount) + " indices (current offset: " +
+                std::to_string(indexOffset) + ")");
+        }
 
         result.ranges.push_back(range);
 
@@ -779,9 +817,11 @@ ModelData loadModel(const std::string& path, const std::string& projectRoot) {
         indexOffset += range.indexCount;
     }
 
+#ifndef NDEBUG
     auto totalEnd = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> totalMs = totalEnd - totalStart;
     std::cout << "Model loaded in " << totalMs.count() << "ms" << std::endl;
+#endif
 
     return result;
 }
@@ -813,7 +853,9 @@ void loadModelGeometry(
 }
 
 std::unordered_map<std::string, ModelData> loadModelsAsync(const std::vector<std::string>& paths) {
+#ifndef NDEBUG
     auto totalStart = std::chrono::high_resolution_clock::now();
+#endif
 
     // Launch async tasks for each model
     std::vector<std::future<std::pair<std::string, ModelData>>> futures;
@@ -834,9 +876,11 @@ std::unordered_map<std::string, ModelData> loadModelsAsync(const std::vector<std
         results[path] = std::move(data);
     }
 
+#ifndef NDEBUG
     auto totalEnd = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> totalMs = totalEnd - totalStart;
     std::cout << "All models loaded in " << totalMs.count() << "ms (async, " << paths.size() << " models)" << std::endl;
+#endif
 
     return results;
 }

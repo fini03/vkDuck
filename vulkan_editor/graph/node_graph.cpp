@@ -49,7 +49,27 @@ PinEntry* NodeGraph::findPinEntry(ax::NodeEditor::PinId id) {
 }
 
 // Helper to find a pin and its parent node
+// TODO: Refactor to use PinRegistry for O(1) lookup. Current implementation
+// uses dynamic_cast chains which is O(n*m) where n=nodes and m=node_types.
+// Migration plan:
+// 1. Have all node types implement registerPins() to register pins in PinRegistry
+// 2. Modify findPin() to use pinRegistry.findByEditorId() for O(1) lookup
+// 3. Use PinEntry::ownerNodeId to find the node, then retrieve pin via virtual method
+// See findPinEntry() for O(1) lookup when only PinEntry info is needed.
 PinLookupResult NodeGraph::findPin(ax::NodeEditor::PinId id) {
+    // Try fast path via registry first (for nodes that have migrated)
+    if (const PinEntry* entry = pinRegistry.findByEditorId(id); entry && entry->valid) {
+        for (const auto& node : nodes) {
+            if (node->getId() == entry->ownerNodeId) {
+                // Node found - but we still need the actual Pin* from the node
+                // For now, continue to fallback below to get the real pin pointer
+                // TODO: Add virtual method to nodes to get Pin* by PinId
+                break;
+            }
+        }
+    }
+
+    // Fallback: iterate through all nodes (O(n) with dynamic_cast overhead)
     for (const auto& node : nodes) {
         // --- Handle VertexDataNode ---
         if (auto* vertexData = dynamic_cast<VertexDataNode*>(node.get())) {

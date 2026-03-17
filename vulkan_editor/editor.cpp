@@ -128,6 +128,16 @@ void Editor::rebuildLiveViewPrimitives() {
         // (e.g., when a pipeline node is removed but links to its pins remain)
         graph->removeInvalidLinks();
 
+        // Build link indexes for O(1) lookups instead of O(n) scans
+        // endPinToLink: maps input pin -> link (for finding source of an input)
+        // startPinToLinks: maps output pin -> links (for finding targets of an output)
+        std::unordered_map<PinId, const Link*> endPinToLink;
+        std::unordered_multimap<PinId, const Link*> startPinToLinks;
+        for (const auto& link : graph->links) {
+            endPinToLink[link.endPin] = &link;
+            startPinToLinks.emplace(link.startPin, &link);
+        }
+
         graph->buildDependencies();
         auto sortedNodes = graph->topologicalSort();
 
@@ -199,25 +209,24 @@ void Editor::rebuildLiveViewPrimitives() {
             for (size_t i = 0; i < pipelineNode->attachmentInputs.size(); ++i) {
                 const auto& attIn = pipelineNode->attachmentInputs[i];
 
-                // Find the link connected to this input pin
-                for (const auto& link : graph->links) {
-                    if (link.endPin == attIn.pin.id) {
-                        // Found the link - get the source output handle
-                        auto itSource = outputMap.find(link.startPin);
-                        if (itSource != outputMap.end()) {
-                            // Find the corresponding output pin for this attachment
-                            if (i < pipelineNode->shaderReflection.attachmentConfigs.size()) {
-                                const auto& config = pipelineNode->shaderReflection.attachmentConfigs[i];
-                                // Add/update the output map with the passthrough handle
-                                outputMap[config.pin.id] = itSource->second;
-                                Log::debug(
-                                    "LiveView",
-                                    "Pipeline '{}': passthrough attachment {} -> {}",
-                                    pipelineNode->name, attIn.pin.label, config.pin.label
-                                );
-                            }
+                // O(1) lookup instead of O(n) scan
+                auto linkIt = endPinToLink.find(attIn.pin.id);
+                if (linkIt != endPinToLink.end()) {
+                    const auto* link = linkIt->second;
+                    // Found the link - get the source output handle
+                    auto itSource = outputMap.find(link->startPin);
+                    if (itSource != outputMap.end()) {
+                        // Find the corresponding output pin for this attachment
+                        if (i < pipelineNode->shaderReflection.attachmentConfigs.size()) {
+                            const auto& config = pipelineNode->shaderReflection.attachmentConfigs[i];
+                            // Add/update the output map with the passthrough handle
+                            outputMap[config.pin.id] = itSource->second;
+                            Log::debug(
+                                "LiveView",
+                                "Pipeline '{}': passthrough attachment {} -> {}",
+                                pipelineNode->name, attIn.pin.label, config.pin.label
+                            );
                         }
-                        break;
                     }
                 }
             }
@@ -325,15 +334,17 @@ void Editor::rebuildLiveViewPrimitives() {
 
                 // Check if any attachment output connects to another pipeline's attachment input
                 for (const auto& config : pipelineNode->shaderReflection.attachmentConfigs) {
-                    for (const auto& link : graph->links) {
-                        if (link.startPin != config.pin.id) continue;
+                    // O(1) lookup using startPinToLinks instead of O(n) scan
+                    auto [rangeBegin, rangeEnd] = startPinToLinks.equal_range(config.pin.id);
+                    for (auto it = rangeBegin; it != rangeEnd; ++it) {
+                        const auto* link = it->second;
 
                         // Check if the end pin is an attachment input on another pipeline
-                        auto endPinInfo = graph->findPin(link.endPin);
+                        auto endPinInfo = graph->findPin(link->endPin);
                         if (auto* targetPipeline = dynamic_cast<PipelineNode*>(endPinInfo.node)) {
                             // Check if this is an attachment input pin
                             for (const auto& attIn : targetPipeline->attachmentInputs) {
-                                if (link.endPin == attIn.pin.id) {
+                                if (link->endPin == attIn.pin.id) {
                                     // This pipeline's output goes to another pipeline's attachment input
                                     // Don't end the render pass
                                     pipeline.endsRenderPass = false;

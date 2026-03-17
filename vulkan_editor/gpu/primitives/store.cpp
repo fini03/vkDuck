@@ -4,6 +4,36 @@
 namespace primitives {
 
 void Store::reset() {
+    // Reset used primitives to default state. This properly cleans up
+    // std::string/std::vector members via move assignment.
+    // Note: destroy() must be called before reset() to release GPU resources.
+    for (uint32_t i = 0; i < arrayCount; ++i)
+        arrays[i] = Array{};
+    for (uint32_t i = 0; i < vertexDataCount; ++i)
+        vertexDatas[i] = VertexData{};
+    for (uint32_t i = 0; i < uniformBufferCount; ++i)
+        uniformBuffers[i] = UniformBuffer{};
+    for (uint32_t i = 0; i < cameraCount; ++i)
+        cameras[i] = Camera{};
+    for (uint32_t i = 0; i < lightCount; ++i)
+        lights[i] = Light{};
+    for (uint32_t i = 0; i < descriptorPoolCount; ++i)
+        descriptorPools[i] = DescriptorPool{};
+    for (uint32_t i = 0; i < descriptorSetCount; ++i)
+        descriptorSets[i] = DescriptorSet{};
+    for (uint32_t i = 0; i < renderPassCount; ++i)
+        renderPasses[i] = RenderPass{};
+    for (uint32_t i = 0; i < pipelineCount; ++i)
+        pipelines[i] = Pipeline{};
+    for (uint32_t i = 0; i < shaderCount; ++i)
+        shaders[i] = Shader{};
+    for (uint32_t i = 0; i < imageCount; ++i)
+        images[i] = Image{};
+    for (uint32_t i = 0; i < attachmentCount; ++i)
+        attachments[i] = Attachment{};
+    for (uint32_t i = 0; i < presentCount; ++i)
+        presents[i] = Present{};
+
     arrayCount = 0;
     vertexDataCount = 0;
     uniformBufferCount = 0;
@@ -292,53 +322,97 @@ std::vector<const GenerateNode*> Store::getGenerateNodes() const {
 }
 
 Node* Store::getNode(StoreHandle handle) {
-    assert(handle.isValid());
+    if (!handle.isValid()) {
+        Log::error("Store", "getNode called with invalid handle");
+        return nullptr;
+    }
 
     switch (handle.type) {
     case Type::Array:
-        assert(handle.handle < arrayCount);
+        if (handle.handle >= arrayCount) {
+            Log::error("Store", "Array handle {} out of bounds (count: {})", handle.handle, arrayCount);
+            return nullptr;
+        }
         return &arrays[handle.handle];
     case Type::VertexData:
-        assert(handle.handle < vertexDataCount);
+        if (handle.handle >= vertexDataCount) {
+            Log::error("Store", "VertexData handle {} out of bounds (count: {})", handle.handle, vertexDataCount);
+            return nullptr;
+        }
         return &vertexDatas[handle.handle];
     case Type::UniformBuffer:
-        assert(handle.handle < uniformBufferCount);
+        if (handle.handle >= uniformBufferCount) {
+            Log::error("Store", "UniformBuffer handle {} out of bounds (count: {})", handle.handle, uniformBufferCount);
+            return nullptr;
+        }
         return &uniformBuffers[handle.handle];
     case Type::Camera:
-        assert(handle.handle < cameraCount);
+        if (handle.handle >= cameraCount) {
+            Log::error("Store", "Camera handle {} out of bounds (count: {})", handle.handle, cameraCount);
+            return nullptr;
+        }
         return &cameras[handle.handle];
     case Type::Light:
-        assert(handle.handle < lightCount);
+        if (handle.handle >= lightCount) {
+            Log::error("Store", "Light handle {} out of bounds (count: {})", handle.handle, lightCount);
+            return nullptr;
+        }
         return &lights[handle.handle];
     case Type::DescriptorPool:
-        assert(handle.handle < descriptorPoolCount);
+        if (handle.handle >= descriptorPoolCount) {
+            Log::error("Store", "DescriptorPool handle {} out of bounds (count: {})", handle.handle, descriptorPoolCount);
+            return nullptr;
+        }
         return &descriptorPools[handle.handle];
     case Type::DescriptorSet:
-        assert(handle.handle < descriptorSetCount);
+        if (handle.handle >= descriptorSetCount) {
+            Log::error("Store", "DescriptorSet handle {} out of bounds (count: {})", handle.handle, descriptorSetCount);
+            return nullptr;
+        }
         return &descriptorSets[handle.handle];
     case Type::RenderPass:
-        assert(handle.handle < renderPassCount);
+        if (handle.handle >= renderPassCount) {
+            Log::error("Store", "RenderPass handle {} out of bounds (count: {})", handle.handle, renderPassCount);
+            return nullptr;
+        }
         return &renderPasses[handle.handle];
     case Type::Attachment:
-        assert(handle.handle < attachmentCount);
+        if (handle.handle >= attachmentCount) {
+            Log::error("Store", "Attachment handle {} out of bounds (count: {})", handle.handle, attachmentCount);
+            return nullptr;
+        }
         return &attachments[handle.handle];
     case Type::Image:
-        assert(handle.handle < imageCount);
+        if (handle.handle >= imageCount) {
+            Log::error("Store", "Image handle {} out of bounds (count: {})", handle.handle, imageCount);
+            return nullptr;
+        }
         return &images[handle.handle];
     case Type::Pipeline:
-        assert(handle.handle < pipelineCount);
+        if (handle.handle >= pipelineCount) {
+            Log::error("Store", "Pipeline handle {} out of bounds (count: {})", handle.handle, pipelineCount);
+            return nullptr;
+        }
         return &pipelines[handle.handle];
     case Type::Shader:
-        assert(handle.handle < shaderCount);
+        if (handle.handle >= shaderCount) {
+            Log::error("Store", "Shader handle {} out of bounds (count: {})", handle.handle, shaderCount);
+            return nullptr;
+        }
         return &shaders[handle.handle];
     case Type::Present:
-        assert(handle.handle < presentCount);
+        if (handle.handle >= presentCount) {
+            Log::error("Store", "Present handle {} out of bounds (count: {})", handle.handle, presentCount);
+            return nullptr;
+        }
         return &presents[handle.handle];
     case Type::Invalid:
-        std::unreachable();
+        Log::error("Store", "getNode called with Invalid type");
+        return nullptr;
     }
 
-    std::unreachable();
+    Log::error("Store", "getNode: unknown handle type {}", static_cast<int>(handle.type));
+    return nullptr;
 }
 
 void Store::updateSwapchainExtent(const VkExtent3D& extent) {

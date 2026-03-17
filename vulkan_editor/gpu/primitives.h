@@ -104,7 +104,7 @@ struct StoreHandle {
     }
 
     bool isValid() const {
-        return handle != UINT16_MAX && type != Type::Invalid;
+        return handle != UINT32_MAX && type != Type::Invalid;
     }
 };
 

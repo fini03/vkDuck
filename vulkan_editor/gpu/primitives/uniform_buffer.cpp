@@ -86,7 +86,10 @@ void UniformBuffer::recordCommands(
     // Check if data actually needs updates
     switch (dataType) {
     case UniformDataType::Camera:
-        assert(extraData != nullptr);
+        if (!extraData) {
+            Log::error("Primitives", "UniformBuffer::recordCommands - Camera UBO missing extraData");
+            return;
+        }
         if (auto type = reinterpret_cast<const CameraType*>(extraData);
             *type == CameraType::Fixed) {
             return;
@@ -99,7 +102,16 @@ void UniformBuffer::recordCommands(
         return;
     }
 
-    // Assumes a mapped buffer, otherwise stage
+    // Validate mapped pointer before use
+    if (!mapped) {
+        Log::error("Primitives", "UniformBuffer::recordCommands - buffer not mapped");
+        return;
+    }
+    if (data.empty()) {
+        Log::error("Primitives", "UniformBuffer::recordCommands - data is empty");
+        return;
+    }
+
     memcpy(mapped, data.data(), data.size());
 }
 
@@ -115,12 +127,24 @@ void Camera::recordCommands(
     if (isFixed())
         return;
 
-    assert(ubo.isValid() && "Camera must have a valid UBO handle");
-    assert(ubo.handle < store.uniformBuffers.size() && "UBO handle out of bounds");
+    if (!ubo.isValid()) {
+        Log::error("Primitives", "Camera::recordCommands - invalid UBO handle");
+        return;
+    }
+    if (ubo.handle >= store.uniformBuffers.size()) {
+        Log::error("Primitives", "Camera::recordCommands - UBO handle out of bounds");
+        return;
+    }
 
     auto& uniformBuffer = store.uniformBuffers[ubo.handle];
-    assert(uniformBuffer.mapped != nullptr && "Camera UBO must be mapped");
-    assert(!uniformBuffer.data.empty() && "Camera UBO data must not be empty");
+    if (!uniformBuffer.mapped) {
+        Log::error("Primitives", "Camera::recordCommands - UBO not mapped");
+        return;
+    }
+    if (uniformBuffer.data.empty()) {
+        Log::error("Primitives", "Camera::recordCommands - UBO data is empty");
+        return;
+    }
 
     memcpy(uniformBuffer.mapped, uniformBuffer.data.data(), uniformBuffer.data.size());
 }
@@ -162,7 +186,21 @@ void Light::recordCommands(
     if (!ubo.isValid())
         return;
 
+    if (ubo.handle >= store.uniformBuffers.size()) {
+        Log::error("Primitives", "Light::recordCommands - UBO handle out of bounds");
+        return;
+    }
+
     auto& uniformBuffer = store.uniformBuffers[ubo.handle];
+    if (!uniformBuffer.mapped) {
+        Log::error("Primitives", "Light::recordCommands - UBO not mapped");
+        return;
+    }
+    if (uniformBuffer.data.empty()) {
+        Log::error("Primitives", "Light::recordCommands - UBO data is empty");
+        return;
+    }
+
     memcpy(uniformBuffer.mapped, uniformBuffer.data.data(), uniformBuffer.data.size());
 }
 
