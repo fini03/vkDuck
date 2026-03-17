@@ -5,7 +5,7 @@ class CameraNodeBase;
 class OrbitalCameraNode;
 class FPSCameraNode;
 class FixedCameraNode;
-class UBONode;
+class MultiUBONode;
 class NodeGraph;
 
 class CameraEditorUI {
@@ -14,18 +14,20 @@ public:
     static void Draw(
         CameraNodeBase* camera,
         NodeGraph* graph = nullptr,
-        UBONode* uboNode = nullptr
+        MultiUBONode* uboNode = nullptr
     );
 
 private:
     // Specific UI for each camera type
     static void DrawOrbitalCamera(
         OrbitalCameraNode* camera,
-        UBONode* uboNode
+        NodeGraph* graph,
+        MultiUBONode* uboNode
     );
     static void DrawFPSCamera(
         FPSCameraNode* camera,
-        UBONode* uboNode
+        NodeGraph* graph,
+        MultiUBONode* uboNode
     );
     static void DrawFixedCamera(FixedCameraNode* camera);
 

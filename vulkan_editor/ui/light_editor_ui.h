@@ -2,9 +2,10 @@
 #include <imgui.h>
 
 class LightNode;
-class UBONode;
+class MultiUBONode;
+class NodeGraph;
 
 class LightEditorUI {
 public:
-    static void Draw(LightNode* lights, UBONode* uboNode = nullptr);
+    static void Draw(LightNode* lights, MultiUBONode* uboNode = nullptr, NodeGraph* graph = nullptr);
 };

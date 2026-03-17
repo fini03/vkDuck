@@ -3,7 +3,7 @@
 #include "attachment_editor_ui.h"
 #include "camera_editor_ui.h"
 #include "light_editor_ui.h"
-#include "model_settings_ui.h"
+// model_settings_ui.h deprecated - using multi_model_settings_ui
 #include "multi_model_settings_ui.h"
 #include "pipeline_settings_ui.h"
 #include "vulkan_editor/asset/model_manager.h"
@@ -12,12 +12,9 @@
 #include "vulkan_editor/graph/fixed_camera_node.h"
 #include "vulkan_editor/graph/fps_camera_node.h"
 #include "vulkan_editor/graph/light_node.h"
-#include "vulkan_editor/graph/material_node.h"
-// #include "vulkan_editor/graph/model_node.h"  // DEPRECATED
+// Singular model nodes deprecated - moved to graph/deprecated/
 #include "vulkan_editor/graph/pipeline_node.h"
 #include "vulkan_editor/graph/present_node.h"
-#include "vulkan_editor/graph/ubo_node.h"
-#include "vulkan_editor/graph/vertex_data_node.h"
 #include "vulkan_editor/graph/multi_model_source_node.h"
 #include "vulkan_editor/graph/multi_vertex_data_node.h"
 #include "vulkan_editor/graph/multi_ubo_node.h"
@@ -140,10 +137,8 @@ void PipelineEditorUI::DrawPaneHeader(float paneWidth) {
     // Dynamic header based on selection
     if (selectedPipeline) {
         ImGui::TextUnformatted("Pipeline Settings");
-    } else if (selectedVertexData || selectedUBO || selectedMaterial) {
-        ImGui::TextUnformatted("Model Settings");
     } else if (selectedMultiModelSource || selectedMultiVertexData || selectedMultiUBO || selectedMultiMaterial) {
-        ImGui::TextUnformatted("Multi-Model Settings");
+        ImGui::TextUnformatted("Model Settings");
     } else {
         ImGui::TextUnformatted("Node Settings");
     }
@@ -156,38 +151,36 @@ void PipelineEditorUI::DrawNodeSettings(ShaderManager* shaderManager) {
         PipelineSettingsUI::Draw(
             selectedPipeline, graph, shaderManager
         );
-    } else if (selectedVertexData) {
-        ModelSettingsUI::Draw(selectedVertexData);
-    } else if (selectedUBO) {
-        ModelSettingsUI::Draw(selectedUBO);
-    } else if (selectedMaterial) {
-        ModelSettingsUI::Draw(selectedMaterial);
     } else if (selectedCamera) {
-        // Find first UBO node with GLTF cameras for initialization
-        UBONode* uboWithCameras = nullptr;
+        // Find first MultiUBONode with GLTF cameras for initialization
+        MultiUBONode* uboWithCameras = nullptr;
         for (const auto& node : graph.nodes) {
-            if (auto* ubo = dynamic_cast<UBONode*>(node.get())) {
-                const CachedModel* cached = ubo->getCachedModel();
-                if (cached && !cached->cameras.empty()) {
-                    uboWithCameras = ubo;
-                    break;
+            if (auto* ubo = dynamic_cast<MultiUBONode*>(node.get())) {
+                // Multi UBO gets cameras from source node
+                if (auto* source = ubo->findSourceNode(graph)) {
+                    if (!source->getMergedCameras().empty()) {
+                        uboWithCameras = ubo;
+                        break;
+                    }
                 }
             }
         }
         CameraEditorUI::Draw(selectedCamera, &graph, uboWithCameras);
     } else if (selectedLight) {
-        // Find first UBO node with GLTF lights for initialization
-        UBONode* uboWithLights = nullptr;
+        // Find first MultiUBONode with GLTF lights for initialization
+        MultiUBONode* uboWithLights = nullptr;
         for (const auto& node : graph.nodes) {
-            if (auto* ubo = dynamic_cast<UBONode*>(node.get())) {
-                const CachedModel* cached = ubo->getCachedModel();
-                if (cached && !cached->lights.empty()) {
-                    uboWithLights = ubo;
-                    break;
+            if (auto* ubo = dynamic_cast<MultiUBONode*>(node.get())) {
+                // Multi UBO gets lights from source node
+                if (auto* source = ubo->findSourceNode(graph)) {
+                    if (!source->getMergedLights().empty()) {
+                        uboWithLights = ubo;
+                        break;
+                    }
                 }
             }
         }
-        LightEditorUI::Draw(selectedLight, uboWithLights);
+        LightEditorUI::Draw(selectedLight, uboWithLights, &graph);
     } else if (selectedPresent) {
         ImGui::TextWrapped("Present Node - displays final output");
     } else if (selectedMultiModelSource) {
@@ -448,21 +441,6 @@ void PipelineEditorUI::DeleteNodes() {
                     deletedId) {
                 selectedPipeline = nullptr;
             }
-            if (selectedVertexData &&
-                static_cast<uint64_t>(selectedVertexData->getId()) ==
-                    deletedId) {
-                selectedVertexData = nullptr;
-            }
-            if (selectedUBO &&
-                static_cast<uint64_t>(selectedUBO->getId()) ==
-                    deletedId) {
-                selectedUBO = nullptr;
-            }
-            if (selectedMaterial &&
-                static_cast<uint64_t>(selectedMaterial->getId()) ==
-                    deletedId) {
-                selectedMaterial = nullptr;
-            }
             if (selectedPresent &&
                 static_cast<uint64_t>(selectedPresent->getId()) ==
                     deletedId) {
@@ -592,9 +570,6 @@ void PipelineEditorUI::UpdateSelectedNode(ed::NodeId selectedNodeId) {
         if (static_cast<uint64_t>(node->getId()) ==
             selectedNodeId.Get()) {
             selectedPipeline = dynamic_cast<PipelineNode*>(node.get());
-            selectedVertexData = dynamic_cast<VertexDataNode*>(node.get());
-            selectedUBO = dynamic_cast<UBONode*>(node.get());
-            selectedMaterial = dynamic_cast<MaterialNode*>(node.get());
             selectedMultiModelSource = dynamic_cast<MultiModelSourceNode*>(node.get());
             selectedMultiVertexData = dynamic_cast<MultiVertexDataNode*>(node.get());
             selectedMultiUBO = dynamic_cast<MultiUBONode*>(node.get());
@@ -609,9 +584,6 @@ void PipelineEditorUI::UpdateSelectedNode(ed::NodeId selectedNodeId) {
 
 void PipelineEditorUI::ClearSelection() {
     selectedPipeline = nullptr;
-    selectedVertexData = nullptr;
-    selectedUBO = nullptr;
-    selectedMaterial = nullptr;
     selectedMultiModelSource = nullptr;
     selectedMultiVertexData = nullptr;
     selectedMultiUBO = nullptr;
@@ -624,36 +596,6 @@ void PipelineEditorUI::ClearSelection() {
 // ============================================================================
 // Get All Model Nodes
 // ============================================================================
-std::vector<VertexDataNode*> PipelineEditorUI::getAllVertexDataNodes() const {
-    std::vector<VertexDataNode*> result;
-    for (const auto& node : graph.nodes) {
-        if (auto* vertexData = dynamic_cast<VertexDataNode*>(node.get())) {
-            result.push_back(vertexData);
-        }
-    }
-    return result;
-}
-
-std::vector<UBONode*> PipelineEditorUI::getAllUBONodes() const {
-    std::vector<UBONode*> result;
-    for (const auto& node : graph.nodes) {
-        if (auto* ubo = dynamic_cast<UBONode*>(node.get())) {
-            result.push_back(ubo);
-        }
-    }
-    return result;
-}
-
-std::vector<MaterialNode*> PipelineEditorUI::getAllMaterialNodes() const {
-    std::vector<MaterialNode*> result;
-    for (const auto& node : graph.nodes) {
-        if (auto* material = dynamic_cast<MaterialNode*>(node.get())) {
-            result.push_back(material);
-        }
-    }
-    return result;
-}
-
 std::vector<MultiVertexDataNode*> PipelineEditorUI::getAllMultiVertexDataNodes() const {
     std::vector<MultiVertexDataNode*> result;
     for (const auto& node : graph.nodes) {
@@ -758,34 +700,8 @@ void PipelineEditorUI::ShowBackgroundContextMenu(
         setNodePosition(nodePtr);
     }
 
-    // Model submenu with specialized node types
+    // Model submenu for nodes that can load multiple GLTF files
     if (ImGui::BeginMenu("Model")) {
-        if (ImGui::MenuItem("Vertex Data")) {
-            auto node = std::make_unique<VertexDataNode>();
-            auto* nodePtr = node.get();
-            graph.addNode(std::move(node));
-            setNodePosition(nodePtr);
-        }
-
-        if (ImGui::MenuItem("UBO (Matrices/Camera/Light)")) {
-            auto node = std::make_unique<UBONode>();
-            auto* nodePtr = node.get();
-            graph.addNode(std::move(node));
-            setNodePosition(nodePtr);
-        }
-
-        if (ImGui::MenuItem("Material (PBR Textures)")) {
-            auto node = std::make_unique<MaterialNode>();
-            auto* nodePtr = node.get();
-            graph.addNode(std::move(node));
-            setNodePosition(nodePtr);
-        }
-
-        ImGui::EndMenu();
-    }
-
-    // Multi-Model submenu for nodes that combine multiple GLTF files
-    if (ImGui::BeginMenu("Multi-Model")) {
         if (ImGui::MenuItem("Model Source")) {
             auto node = std::make_unique<MultiModelSourceNode>();
             auto* nodePtr = node.get();

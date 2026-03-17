@@ -3,7 +3,8 @@
 #include "vulkan_editor/graph/camera_node.h"
 #include "vulkan_editor/graph/fixed_camera_node.h"
 #include "vulkan_editor/graph/fps_camera_node.h"
-#include "vulkan_editor/graph/ubo_node.h"
+#include "vulkan_editor/graph/multi_ubo_node.h"
+#include "vulkan_editor/graph/multi_model_source_node.h"
 #include "vulkan_editor/graph/node_graph.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
@@ -12,7 +13,7 @@
 void CameraEditorUI::Draw(
     CameraNodeBase* camera,
     NodeGraph* graph,
-    UBONode* uboNode
+    MultiUBONode* uboNode
 ) {
     if (!camera)
         return;
@@ -21,9 +22,9 @@ void CameraEditorUI::Draw(
 
     // Dispatch to specific camera type UI
     if (auto* orbital = dynamic_cast<OrbitalCameraNode*>(camera)) {
-        DrawOrbitalCamera(orbital, uboNode);
+        DrawOrbitalCamera(orbital, graph, uboNode);
     } else if (auto* fps = dynamic_cast<FPSCameraNode*>(camera)) {
-        DrawFPSCamera(fps, uboNode);
+        DrawFPSCamera(fps, graph, uboNode);
     } else if (auto* fixed = dynamic_cast<FixedCameraNode*>(camera)) {
         DrawFixedCamera(fixed);
     }
@@ -36,18 +37,21 @@ void CameraEditorUI::Draw(
 
 void CameraEditorUI::DrawOrbitalCamera(
     OrbitalCameraNode* camera,
-    UBONode* uboNode
+    NodeGraph* graph,
+    MultiUBONode* uboNode
 ) {
-    // GLTF Cameras from model file (if UBO node provided and has cameras)
-    const CachedModel* cached = uboNode ? uboNode->getCachedModel() : nullptr;
-    if (cached && !cached->cameras.empty()) {
+    // GLTF Cameras from model source (if UBO node provided and connected to source)
+    MultiModelSourceNode* source = (uboNode && graph) ? uboNode->findSourceNode(*graph) : nullptr;
+    const auto& cameras = source ? source->getMergedCameras() : std::vector<GLTFCamera>{};
+
+    if (!cameras.empty()) {
         if (ImGui::CollapsingHeader(
                 "GLTF Cameras", ImGuiTreeNodeFlags_DefaultOpen
             )) {
             // Build camera names for combo box
             std::vector<const char*> cameraNames;
             cameraNames.push_back("Default Camera");
-            for (const auto& cam : cached->cameras) {
+            for (const auto& cam : cameras) {
                 cameraNames.push_back(cam.name.c_str());
             }
 
@@ -63,15 +67,16 @@ void CameraEditorUI::DrawOrbitalCamera(
                 // Auto-apply when selection changes
                 if (uboNode->selectedCameraIndex >= 0) {
                     camera->applyGLTFCamera(
-                        cached->cameras[uboNode->selectedCameraIndex]
+                        cameras[uboNode->selectedCameraIndex]
                     );
                 }
             }
 
             // Show selected camera info from GLTF file
-            if (uboNode->selectedCameraIndex >= 0) {
+            if (uboNode->selectedCameraIndex >= 0 &&
+                uboNode->selectedCameraIndex < static_cast<int>(cameras.size())) {
                 const auto& cam =
-                    cached->cameras[uboNode->selectedCameraIndex];
+                    cameras[uboNode->selectedCameraIndex];
                 ImGui::TextColored(
                     ImVec4(0.7f, 0.9f, 0.7f, 1.0f), "GLTF Camera: %s",
                     cam.name.c_str()
@@ -184,18 +189,21 @@ void CameraEditorUI::DrawOrbitalCamera(
 
 void CameraEditorUI::DrawFPSCamera(
     FPSCameraNode* camera,
-    UBONode* uboNode
+    NodeGraph* graph,
+    MultiUBONode* uboNode
 ) {
-    // GLTF Cameras from model file (if UBO node provided and has cameras)
-    const CachedModel* cached = uboNode ? uboNode->getCachedModel() : nullptr;
-    if (cached && !cached->cameras.empty()) {
+    // GLTF Cameras from model source (if UBO node provided and connected to source)
+    MultiModelSourceNode* source = (uboNode && graph) ? uboNode->findSourceNode(*graph) : nullptr;
+    const auto& cameras = source ? source->getMergedCameras() : std::vector<GLTFCamera>{};
+
+    if (!cameras.empty()) {
         if (ImGui::CollapsingHeader(
                 "GLTF Cameras", ImGuiTreeNodeFlags_DefaultOpen
             )) {
             // Build camera names for combo box
             std::vector<const char*> cameraNames;
             cameraNames.push_back("Default Camera");
-            for (const auto& cam : cached->cameras) {
+            for (const auto& cam : cameras) {
                 cameraNames.push_back(cam.name.c_str());
             }
 
@@ -211,15 +219,16 @@ void CameraEditorUI::DrawFPSCamera(
                 // Auto-apply when selection changes
                 if (uboNode->selectedCameraIndex >= 0) {
                     camera->applyGLTFCamera(
-                        cached->cameras[uboNode->selectedCameraIndex]
+                        cameras[uboNode->selectedCameraIndex]
                     );
                 }
             }
 
             // Show selected camera info from GLTF file
-            if (uboNode->selectedCameraIndex >= 0) {
+            if (uboNode->selectedCameraIndex >= 0 &&
+                uboNode->selectedCameraIndex < static_cast<int>(cameras.size())) {
                 const auto& cam =
-                    cached->cameras[uboNode->selectedCameraIndex];
+                    cameras[uboNode->selectedCameraIndex];
                 ImGui::TextColored(
                     ImVec4(0.7f, 0.9f, 0.7f, 1.0f), "GLTF Camera: %s",
                     cam.name.c_str()

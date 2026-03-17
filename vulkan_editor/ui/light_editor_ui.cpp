@@ -1,28 +1,32 @@
 #include "light_editor_ui.h"
 #include "vulkan_editor/graph/light_node.h"
-#include "vulkan_editor/graph/ubo_node.h"
+#include "vulkan_editor/graph/multi_ubo_node.h"
+#include "vulkan_editor/graph/multi_model_source_node.h"
+#include "vulkan_editor/graph/node_graph.h"
 #include "vulkan_editor/asset/model_manager.h"
 #include <vkDuck/model_loader.h>
 #include <numbers>
 #include <vector>
 
-void LightEditorUI::Draw(LightNode* lightNode, UBONode* uboNode) {
+void LightEditorUI::Draw(LightNode* lightNode, MultiUBONode* uboNode, NodeGraph* graph) {
     if (!lightNode)
         return;
 
-    // GLTF Lights import section (if UBO node has lights)
-    const CachedModel* cached = uboNode ? uboNode->getCachedModel() : nullptr;
-    if (cached && !cached->lights.empty()) {
+    // GLTF Lights import section (if UBO node has lights from source)
+    MultiModelSourceNode* source = (uboNode && graph) ? uboNode->findSourceNode(*graph) : nullptr;
+    const auto& mergedLights = source ? source->getMergedLights() : std::vector<GLTFLight>{};
+
+    if (!mergedLights.empty()) {
         ImGui::SeparatorText("Import from GLTF");
 
         // Build light names for combo box
         std::vector<const char*> lightNames;
-        for (const auto& light : cached->lights) {
+        for (const auto& light : mergedLights) {
             lightNames.push_back(light.name.c_str());
         }
 
         static int selectedGLTFLight = 0;
-        if (selectedGLTFLight >= static_cast<int>(cached->lights.size())) {
+        if (selectedGLTFLight >= static_cast<int>(mergedLights.size())) {
             selectedGLTFLight = 0;
         }
 
@@ -32,7 +36,7 @@ void LightEditorUI::Draw(LightNode* lightNode, UBONode* uboNode) {
         );
 
         // Show GLTF light info
-        const auto& gltfLight = cached->lights[selectedGLTFLight];
+        const auto& gltfLight = mergedLights[selectedGLTFLight];
         const char* typeStr = "Unknown";
         switch (gltfLight.type) {
             case GLTFLightType::Directional: typeStr = "Directional"; break;
@@ -87,11 +91,11 @@ void LightEditorUI::Draw(LightNode* lightNode, UBONode* uboNode) {
         ImGui::SameLine();
         if (ImGui::Button("Import All GLTF Lights")) {
             // Replace all lights with GLTF lights
-            lightNode->numLights = static_cast<int>(cached->lights.size());
+            lightNode->numLights = static_cast<int>(mergedLights.size());
             lightNode->lightsBuffer.lights.resize(lightNode->numLights);
 
-            for (size_t i = 0; i < cached->lights.size(); ++i) {
-                const auto& src = cached->lights[i];
+            for (size_t i = 0; i < mergedLights.size(); ++i) {
+                const auto& src = mergedLights[i];
                 auto& dst = lightNode->lightsBuffer.lights[i];
                 dst.position = src.position;
                 dst.color = src.color;
