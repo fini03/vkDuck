@@ -275,6 +275,9 @@ void MultiModelSourceNode::rebuildConsolidatedData() {
               "Consolidated {} models: {} vertices, {} indices, {} ranges",
               models_.size(), consolidatedVertices_.size(),
               consolidatedIndices_.size(), consolidatedRanges_.size());
+
+    // Flag that editor should rebuild primitives to update connections
+    needsRebuild_ = true;
 }
 
 nlohmann::json MultiModelSourceNode::toJson() const {

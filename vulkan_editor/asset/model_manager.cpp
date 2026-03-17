@@ -126,6 +126,12 @@ void ModelManager::scanModels() {
         std::sort(availableModels_.begin(), availableModels_.end());
         Log::info(LOG_CATEGORY, "Found {} models in project", availableModels_.size());
 
+        // Clean up stale cache entries (models that no longer exist on disk)
+        cleanupStaleCacheEntries();
+
+        // Setup directory watcher if not already active
+        setupDirectoryWatcher();
+
     } catch (const std::exception& e) {
         Log::error(LOG_CATEGORY, "Error scanning models directory: {}", e.what());
     }
@@ -134,6 +140,152 @@ void ModelManager::scanModels() {
 std::vector<fs::path> ModelManager::getAvailableModels() const {
     std::lock_guard lock(mutex_);
     return availableModels_;
+}
+
+void ModelManager::setupDirectoryWatcher() {
+    if (projectRoot_.empty()) {
+        return;
+    }
+
+    fs::path modelsDir = projectRoot_ / "data" / "models";
+    if (!fs::exists(modelsDir)) {
+        return;
+    }
+
+    // Create watcher if it doesn't exist
+    if (!directoryWatcher_) {
+        directoryWatcher_ = std::make_unique<DirectoryWatcher>("ModelsDirWatcher");
+    }
+
+    // Don't restart if already watching the same directory
+    if (directoryWatcher_->isWatching() &&
+        directoryWatcher_->getWatchedDirectory() == modelsDir.string()) {
+        return;
+    }
+
+    // Set up callbacks
+    directoryWatcher_->setFileChangeCallback(
+        [this](const std::string& filepath, const std::string& filename, DirectoryWatcher::FileAction action) {
+            handleDirectoryChange(filepath, filename, action);
+        }
+    );
+
+    directoryWatcher_->setDirectoryChangeCallback([this]() {
+        pendingRescan_ = true;
+    });
+
+    // Start watching with model file extensions
+    directoryWatcher_->watchDirectory(
+        modelsDir.string(),
+        {".gltf", ".glb", ".obj"},
+        true  // recursive
+    );
+
+    Log::info(LOG_CATEGORY, "Started watching models directory: {}", modelsDir.string());
+}
+
+void ModelManager::handleDirectoryChange(
+    const std::string& filepath,
+    const std::string& filename,
+    DirectoryWatcher::FileAction action
+) {
+    // Convert absolute path to relative path
+    fs::path absolutePath(filepath);
+    fs::path relativePath;
+    try {
+        relativePath = fs::relative(absolutePath, projectRoot_);
+    } catch (const std::exception& e) {
+        Log::warning(LOG_CATEGORY, "Failed to get relative path for {}: {}", filepath, e.what());
+        return;
+    }
+
+    std::string pathKey = relativePath.string();
+
+    switch (action) {
+        case DirectoryWatcher::FileAction::Added:
+            Log::info(LOG_CATEGORY, "Model file added: {}", filename);
+            pendingRescan_ = true;
+            break;
+
+        case DirectoryWatcher::FileAction::Deleted: {
+            Log::info(LOG_CATEGORY, "Model file deleted: {}", filename);
+            // Mark for unload if it was cached
+            std::lock_guard lock(mutex_);
+            auto it = pathToHandle_.find(pathKey);
+            if (it != pathToHandle_.end()) {
+                ModelHandle handle = it->second;
+                if (auto cacheIt = cache_.find(handle); cacheIt != cache_.end()) {
+                    CachedModel* model = cacheIt->second.get();
+                    model->status = ModelStatus::Error;
+                    model->errorMessage = "File was deleted";
+                    Log::warning(LOG_CATEGORY, "Cached model '{}' was deleted from disk", model->displayName);
+                }
+            }
+            pendingRescan_ = true;
+            break;
+        }
+
+        case DirectoryWatcher::FileAction::Modified: {
+            Log::info(LOG_CATEGORY, "Model file modified: {}", filename);
+            // Mark for reload if it was cached
+            std::lock_guard lock(mutex_);
+            auto it = pathToHandle_.find(pathKey);
+            if (it != pathToHandle_.end()) {
+                ModelHandle handle = it->second;
+                if (auto cacheIt = cache_.find(handle); cacheIt != cache_.end()) {
+                    CachedModel* model = cacheIt->second.get();
+                    if (model->autoReload) {
+                        model->pendingReload = true;
+                        Log::info(LOG_CATEGORY, "Marking model '{}' for reload", model->displayName);
+                    }
+                }
+            }
+            break;
+        }
+
+        case DirectoryWatcher::FileAction::Moved:
+            Log::info(LOG_CATEGORY, "Model file moved: {}", filename);
+            pendingRescan_ = true;
+            break;
+    }
+}
+
+void ModelManager::cleanupStaleCacheEntries() {
+    // Must be called with mutex_ already held
+    std::vector<ModelHandle> toRemove;
+
+    for (const auto& [handle, model] : cache_) {
+        fs::path absolutePath = projectRoot_ / model->path;
+        if (!fs::exists(absolutePath)) {
+            // File no longer exists
+            if (model->referenceCount == 0) {
+                toRemove.push_back(handle);
+                Log::info(LOG_CATEGORY, "Removing stale cache entry: {}", model->displayName);
+            } else {
+                // Mark as error but don't remove (still referenced)
+                model->status = ModelStatus::Error;
+                model->errorMessage = "File no longer exists";
+                Log::warning(
+                    LOG_CATEGORY,
+                    "Model '{}' no longer exists but has {} references",
+                    model->displayName,
+                    model->referenceCount
+                );
+            }
+        }
+    }
+
+    for (ModelHandle handle : toRemove) {
+        auto it = cache_.find(handle);
+        if (it != cache_.end()) {
+            pathToHandle_.erase(it->second->path.string());
+            cache_.erase(it);
+        }
+    }
+
+    if (!toRemove.empty()) {
+        Log::info(LOG_CATEGORY, "Cleaned up {} stale cache entries", toRemove.size());
+    }
 }
 
 ModelHandle ModelManager::findOrCreateHandle(const fs::path& relativePath) {
@@ -607,6 +759,13 @@ void ModelManager::reloadModel(ModelHandle handle) {
 }
 
 void ModelManager::processPendingReloads() {
+    // Handle pending directory rescan first
+    if (pendingRescan_.exchange(false)) {
+        Log::info(LOG_CATEGORY, "Processing pending directory rescan");
+        scanModels();
+    }
+
+    // Then handle individual model reloads
     std::vector<ModelHandle> toReload;
 
     {

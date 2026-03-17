@@ -126,6 +126,10 @@ public:
     // Trigger rebuild (called by UI when models change)
     void rebuildConsolidatedData();
 
+    // Flag for editor to know when rebuild is needed
+    bool needsRebuild() const { return needsRebuild_; }
+    void clearNeedsRebuild() { needsRebuild_ = false; }
+
 private:
     void createDefaultPins();
 
@@ -147,4 +151,5 @@ private:
     std::vector<std::unordered_map<int, int>> textureIndexRemap_;
 
     bool usesRegistry_ = false;
+    bool needsRebuild_ = false;
 };

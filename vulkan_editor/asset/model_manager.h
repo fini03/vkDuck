@@ -1,8 +1,10 @@
 #pragma once
 
 #include "vulkan_editor/io/model_watcher.h"
+#include "vulkan_editor/io/directory_watcher.h"
 #include "vulkan_editor/gpu/primitives.h"
 #include <vkDuck/model_loader.h> // For Vertex, GLTFCamera, GLTFLight
+#include <atomic>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -321,11 +323,17 @@ public:
     void reloadModel(ModelHandle handle);
 
     /**
-     * @brief Process pending reloads.
+     * @brief Process pending reloads and rescans.
      *
-     * Call this from the main loop to handle file-watcher triggered reloads.
+     * Call this from the main loop to handle file-watcher triggered reloads
+     * and directory changes.
      */
     void processPendingReloads();
+
+    /**
+     * @brief Check if a rescan of the models directory is pending.
+     */
+    bool isRescanPending() const { return pendingRescan_; }
 
     /**
      * @brief Register a callback for model reload events.
@@ -360,6 +368,13 @@ private:
     // Internal loading implementation
     bool loadModelInternal(CachedModel& model);
     void setupFileWatcher(CachedModel& model);
+    void setupDirectoryWatcher();
+    void handleDirectoryChange(
+        const std::string& filepath,
+        const std::string& filename,
+        DirectoryWatcher::FileAction action
+    );
+    void cleanupStaleCacheEntries();
     ModelHandle findOrCreateHandle(const std::filesystem::path& relativePath);
     void calculateMemoryUsage(CachedModel& model);
 
@@ -377,6 +392,10 @@ private:
 
     // Callbacks
     ModelReloadCallback reloadCallback_;
+
+    // Directory watching for auto-refresh
+    std::unique_ptr<DirectoryWatcher> directoryWatcher_;
+    std::atomic<bool> pendingRescan_{false};
 
     // Thread safety
     mutable std::mutex mutex_;

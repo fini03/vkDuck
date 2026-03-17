@@ -38,6 +38,14 @@ bool AssetLibraryUI::showOnlyLoaded_ = false;
 void AssetLibraryUI::Draw() {
     auto& manager = *g_modelManager;
 
+    // Validate selected model - clear if it no longer exists or has error status
+    if (selectedModel_.isValid()) {
+        const CachedModel* model = manager.getModel(selectedModel_);
+        if (!model || model->status == ModelStatus::Error) {
+            selectedModel_ = {};
+        }
+    }
+
     // Main layout: two-column with splitter
     ImGui::BeginChild("AssetLibraryMain", ImVec2(0, 0), false);
 
@@ -172,8 +180,12 @@ void AssetLibraryUI::drawAvailableModels() {
     }
 
     // Display models
-    for (const auto& path : filteredModels) {
+    for (size_t i = 0; i < filteredModels.size(); ++i) {
+        const auto& path = filteredModels[i];
         std::string displayName = path.filename().string();
+
+        // Use path hash as unique ID to avoid conflicts with same filenames
+        ImGui::PushID(static_cast<int>(std::hash<std::string>{}(path.string())));
 
         // Check if already loaded
         const CachedModel* cached = manager.getModelByPath(path);
@@ -234,6 +246,8 @@ void AssetLibraryUI::drawAvailableModels() {
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("%s", path.string().c_str());
         }
+
+        ImGui::PopID();
     }
 }
 
@@ -381,7 +395,7 @@ void AssetLibraryUI::drawModelDetails() {
 
         if (!model->modelData.ranges.empty()) {
             ImGui::Spacing();
-            if (ImGui::TreeNode("Geometry Ranges")) {
+            if (ImGui::TreeNode("##GeometryRanges", "Geometry Ranges")) {
                 for (size_t i = 0; i < model->modelData.ranges.size(); ++i) {
                     const auto& range = model->modelData.ranges[i];
                     ImGui::BulletText(
@@ -404,6 +418,7 @@ void AssetLibraryUI::drawModelDetails() {
             ImGui::Text("%zu texture(s)", model->images.size());
 
             for (size_t i = 0; i < model->images.size(); ++i) {
+                ImGui::PushID(static_cast<int>(i));
                 const auto& img = model->images[i];
                 std::string filename = img.path.filename().string();
 
@@ -422,6 +437,7 @@ void AssetLibraryUI::drawModelDetails() {
                         img.width, img.height
                     );
                 }
+                ImGui::PopID();
             }
 
             ImGui::Unindent();
@@ -441,7 +457,8 @@ void AssetLibraryUI::drawModelDetails() {
                     ? std::format("Camera {}", i)
                     : cam.name;
 
-                if (ImGui::TreeNode(camLabel.c_str())) {
+                ImGui::PushID(static_cast<int>(i));
+                if (ImGui::TreeNode("##camera", "%s", camLabel.c_str())) {
                     ImGui::Text(
                         "Type: %s",
                         cam.isPerspective ? "Perspective" : "Orthographic"
@@ -462,6 +479,7 @@ void AssetLibraryUI::drawModelDetails() {
                     ImGui::Text("Near: %.3f, Far: %.1f", cam.nearPlane, cam.farPlane);
                     ImGui::TreePop();
                 }
+                ImGui::PopID();
             }
 
             ImGui::Unindent();
@@ -481,7 +499,8 @@ void AssetLibraryUI::drawModelDetails() {
                     ? std::format("Light {}", i)
                     : light.name;
 
-                if (ImGui::TreeNode(lightLabel.c_str())) {
+                ImGui::PushID(static_cast<int>(i));
+                if (ImGui::TreeNode("##light", "%s", lightLabel.c_str())) {
                     ImGui::Text("Type: %s", lightTypeToString(light.type));
                     ImGui::Text(
                         "Position: (%.2f, %.2f, %.2f)",
@@ -499,6 +518,7 @@ void AssetLibraryUI::drawModelDetails() {
 
                     ImGui::TreePop();
                 }
+                ImGui::PopID();
             }
 
             ImGui::Unindent();

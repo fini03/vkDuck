@@ -582,6 +582,20 @@ void Editor::renderPopupNotifications() {
 void Editor::update() {
     // Process any pending model reloads from file watchers
     g_modelManager->processPendingReloads();
+
+    // Check if any multi-model source node needs a rebuild
+    // (e.g., when models are added/removed and light/camera pins become invalid)
+    if (graph) {
+        for (const auto& nodePtr : graph->nodes) {
+            if (auto* source = dynamic_cast<MultiModelSourceNode*>(nodePtr.get())) {
+                if (source->needsRebuild()) {
+                    source->clearNeedsRebuild();
+                    rebuildLiveViewPrimitives();
+                    break; // One rebuild is enough for all nodes
+                }
+            }
+        }
+    }
 }
 
 void Editor::showGlobalSettingsView() {
