@@ -10,9 +10,7 @@ using namespace ShaderTypes;
 class ShaderManager;
 class PipelineSettingsUI;
 class PipelineNode;
-class VertexDataNode;
-class UBONode;
-class MaterialNode;
+// Singular model nodes deprecated - using multi-model nodes
 class MultiModelSourceNode;
 class MultiVertexDataNode;
 class MultiUBONode;
@@ -89,9 +87,6 @@ private:
     float rightPaneWidth = 800.0f;
 
     PipelineNode* selectedPipeline = nullptr;
-    VertexDataNode* selectedVertexData = nullptr;
-    UBONode* selectedUBO = nullptr;
-    MaterialNode* selectedMaterial = nullptr;
     MultiModelSourceNode* selectedMultiModelSource = nullptr;
     MultiVertexDataNode* selectedMultiVertexData = nullptr;
     MultiUBONode* selectedMultiUBO = nullptr;
@@ -110,22 +105,7 @@ public:
     void ApplyNodePositionsToEditor();
 
     /**
-     * @brief Get the currently selected model-related nodes (if any).
-     */
-    VertexDataNode* getSelectedVertexDataNode() const { return selectedVertexData; }
-    UBONode* getSelectedUBONode() const { return selectedUBO; }
-    MaterialNode* getSelectedMaterialNode() const { return selectedMaterial; }
-
-    /**
-     * @brief Get ALL model-related nodes in the graph.
-     * Used for "Use in Node" to assign a model to all model subnodes at once.
-     */
-    std::vector<VertexDataNode*> getAllVertexDataNodes() const;
-    std::vector<UBONode*> getAllUBONodes() const;
-    std::vector<MaterialNode*> getAllMaterialNodes() const;
-
-    /**
-     * @brief Get ALL multi-model nodes in the graph.
+     * @brief Get ALL model nodes in the graph.
      * Used for "Use in Node" to add models to multi-model nodes.
      */
     std::vector<MultiVertexDataNode*> getAllMultiVertexDataNodes() const;
@@ -133,7 +113,7 @@ public:
     std::vector<MultiMaterialNode*> getAllMultiMaterialNodes() const;
 
     /**
-     * @brief Get the currently selected multi-model nodes (if any).
+     * @brief Get the currently selected model nodes (if any).
      */
     MultiModelSourceNode* getSelectedMultiModelSourceNode() const { return selectedMultiModelSource; }
     MultiVertexDataNode* getSelectedMultiVertexDataNode() const { return selectedMultiVertexData; }

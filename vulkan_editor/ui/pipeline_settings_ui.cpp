@@ -1,7 +1,7 @@
 #include "pipeline_settings_ui.h"
 #include "../graph/node_graph.h"
 #include "../graph/pipeline_node.h"
-#include "../graph/vertex_data_node.h"
+#include "../graph/multi_vertex_data_node.h"
 #include "../shader/shader_manager.h"
 #include "attachment_editor_ui.h"
 #include "camera_editor_ui.h"
@@ -177,15 +177,15 @@ void PipelineSettingsUI::Draw(
     // Input Assembly
     ImGui::Text("Input Assembly");
 
-    // Helper lambda to find a connected VertexDataNode
-    auto findConnectedVertexData = [&]() -> VertexDataNode* {
+    // Helper lambda to find a connected MultiVertexDataNode
+    auto findConnectedVertexData = [&]() -> MultiVertexDataNode* {
         // Check the vertex data pin
         if (selectedNode->vertexDataPin.id.Get() != 0) {
             for (const auto& link : graph.links) {
                 if (link.endPin == selectedNode->vertexDataPin.id) {
                     // Find the source node
                     for (auto& nodePtr : graph.nodes) {
-                        if (auto* vertexNode = dynamic_cast<VertexDataNode*>(
+                        if (auto* vertexNode = dynamic_cast<MultiVertexDataNode*>(
                                 nodePtr.get()
                             )) {
                             if (vertexNode->vertexDataPin.id == link.startPin) {
@@ -199,9 +199,9 @@ void PipelineSettingsUI::Draw(
         return nullptr;
     };
 
-    VertexDataNode* connectedVertexData = findConnectedVertexData();
+    MultiVertexDataNode* connectedVertexData = findConnectedVertexData();
 
-    if (connectedVertexData && connectedVertexData->hasModel()) {
+    if (connectedVertexData) {
         // Topology is determined by the GLTF geometry primitive mode
         ImGui::PushStyleColor(
             ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.6f, 1.0f)

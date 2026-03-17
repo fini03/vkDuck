@@ -140,6 +140,8 @@ void MultiVertexDataNode::createPrimitives(primitives::Store& store) {
     }
 
     const auto& ranges = source->getConsolidatedRanges();
+    const auto& rangeInfo = source->getRangeInfo();
+    const auto& models = source->getModels();
     const auto& vertices = source->getConsolidatedVertices();
     const auto& indices = source->getConsolidatedIndices();
 
@@ -183,18 +185,25 @@ void MultiVertexDataNode::createPrimitives(primitives::Store& store) {
         vertexData.bindingDescription = Vertex::getBindingDescription();
         vertexData.attributeDescriptions = Vertex::getAttributeDescriptions();
 
-        // Use source node name for file reference
-        vertexData.modelFilePath = source->name;
-        vertexData.geometryIndex = static_cast<uint32_t>(i);
+        // Get model file path from range info for code generation
+        if (i < rangeInfo.size()) {
+            size_t modelIndex = rangeInfo[i].modelIndex;
+            if (modelIndex < models.size()) {
+                vertexData.modelFilePath = models[modelIndex].path;
+            }
+        }
+        vertexData.geometryIndex = static_cast<uint32_t>(i < rangeInfo.size() ?
+            rangeInfo[i].originalRangeIndex : i);
 
         vertexArray.handles[i] = hVertexData.handle;
 
         Log::debug(
             LOG_CATEGORY,
-            "Created VertexData for range {}: {} verts, {} indices",
+            "Created VertexData for range {}: {} verts, {} indices, model: {}",
             i,
             range.vertexCount,
-            range.indexCount
+            range.indexCount,
+            vertexData.modelFilePath
         );
     }
 

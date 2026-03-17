@@ -57,11 +57,7 @@ editor_files = files(
   'vulkan_editor/graph/pin_registry.cpp',
   'vulkan_editor/graph/validation_rules.cpp',
   'vulkan_editor/graph/pipeline_node.cpp',
-  # 'vulkan_editor/graph/model_node.cpp',  # DEPRECATED - replaced by split nodes
-  'vulkan_editor/graph/model_node_base.cpp',
-  'vulkan_editor/graph/vertex_data_node.cpp',
-  'vulkan_editor/graph/ubo_node.cpp',
-  'vulkan_editor/graph/material_node.cpp',
+  # Singular model nodes moved to deprecated/ - using multi-model nodes instead
   'vulkan_editor/graph/multi_model_source_node.cpp',
   'vulkan_editor/graph/multi_model_consumer_base.cpp',
   'vulkan_editor/graph/multi_vertex_data_node.cpp',
@@ -72,7 +68,7 @@ editor_files = files(
   'vulkan_editor/graph/camera_node.cpp',
   'vulkan_editor/graph/fixed_camera_node.cpp',
   'vulkan_editor/graph/fps_camera_node.cpp',
-  'vulkan_editor/graph/default_renderer.cpp',
+  # default_renderer.cpp moved to deprecated/ - was for singular model nodes
 
   # Shader management
   'vulkan_editor/shader/shader_manager.cpp',
@@ -107,7 +103,7 @@ editor_files = files(
   'vulkan_editor/asset/asset_library_ui.cpp',
   'vulkan_editor/ui/pipeline_editor_ui.cpp',
   'vulkan_editor/ui/pipeline_settings_ui.cpp',
-  'vulkan_editor/ui/model_settings_ui.cpp',
+  # model_settings_ui.cpp moved to deprecated/ - using multi_model_settings_ui instead
   'vulkan_editor/ui/multi_model_settings_ui.cpp',
   'vulkan_editor/ui/camera_editor_ui.cpp',
   'vulkan_editor/ui/light_editor_ui.cpp',

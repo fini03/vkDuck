@@ -976,8 +976,9 @@ void Shader::generateDestroy(const Store& store, std::ostream& out) const {
 
 void Pipeline::generateCreate(const Store& store, std::ostream& out) const {
     assert(!name.empty());
-    assert(renderPass.isValid());
-    const auto& rp{store.renderPasses[renderPass.handle]};
+    StoreHandle effectiveRenderPass = sharedRenderPass.isValid() ? sharedRenderPass : renderPass;
+    assert(effectiveRenderPass.isValid());
+    const auto& rp{store.renderPasses[effectiveRenderPass.handle]};
 
     print(out, "// Pipeline: {}\n", name);
     print(out, "{{\n");

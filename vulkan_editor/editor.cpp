@@ -6,13 +6,9 @@
 #include "external/SimpleFileDialog.h"
 #include "graph/fixed_camera_node.h"
 #include "graph/fps_camera_node.h"
-#include "graph/material_node.h"
-// #include "graph/model_node.h"  // DEPRECATED
 #include "graph/node_graph.h"
 #include "graph/pipeline_node.h"
 #include "graph/present_node.h"
-#include "graph/ubo_node.h"
-#include "graph/vertex_data_node.h"
 #include "graph/multi_model_source_node.h"
 #include "graph/multi_ubo_node.h"
 #include "shader/shader_manager.h"
@@ -57,37 +53,17 @@ Editor::Editor(
     // Initialize global ModelManager pointer
     g_modelManager = &modelManager;
 
-    // Set up Asset Library callback to assign models to ALL model subnodes
+    // Set up Asset Library callback to add models to multi-model source nodes
     AssetLibraryUI::setModelSelectedCallback([this](ModelHandle handle) {
         if (!g_modelManager->isLoaded(handle)) {
             Log::warning("Editor", "Model not loaded");
             return;
         }
 
-        // Get all single-model nodes of each type and assign the model to all of them
-        auto vertexDataNodes = pipelineEditor->getAllVertexDataNodes();
-        auto uboNodes = pipelineEditor->getAllUBONodes();
-        auto materialNodes = pipelineEditor->getAllMaterialNodes();
-
         // Get all multi-model source nodes (consumers get data from sources)
         auto multiModelSourceNodes = pipelineEditor->getAllMultiModelSourceNodes();
 
-        size_t totalAssigned = 0;
         size_t totalAdded = 0;
-
-        // Assign to single-model nodes (replaces existing model)
-        for (auto* node : vertexDataNodes) {
-            node->setModel(handle);
-            ++totalAssigned;
-        }
-        for (auto* node : uboNodes) {
-            node->setModel(handle);
-            ++totalAssigned;
-        }
-        for (auto* node : materialNodes) {
-            node->setModel(handle);
-            ++totalAssigned;
-        }
 
         // Add to multi-model source nodes (consumers read from source)
         for (auto* node : multiModelSourceNodes) {
@@ -95,23 +71,10 @@ Editor::Editor(
             ++totalAdded;
         }
 
-        // Clean up stale links from UBO nodes whose camera/light pins are no longer valid
-        for (auto* node : uboNodes) {
-            for (auto pinId : node->getPinsToUnlink()) {
-                graph->removeLinksForPin(pinId);
-            }
-        }
-
-        if (totalAssigned > 0 || totalAdded > 0) {
-            if (totalAssigned > 0 && totalAdded > 0) {
-                Log::info("Editor", "Assigned model to {} node(s), added to {} multi-model node(s)", totalAssigned, totalAdded);
-            } else if (totalAssigned > 0) {
-                Log::info("Editor", "Assigned model to {} model node(s)", totalAssigned);
-            } else {
-                Log::info("Editor", "Added model to {} multi-model node(s)", totalAdded);
-            }
+        if (totalAdded > 0) {
+            Log::info("Editor", "Added model to {} multi-model node(s)", totalAdded);
         } else {
-            Log::warning("Editor", "No model nodes in graph - add VertexData, UBO, Material, or Multi-Model nodes first");
+            Log::warning("Editor", "No model source nodes in graph - add a Model Source node first");
         }
     });
 }

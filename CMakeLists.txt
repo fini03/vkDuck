@@ -195,20 +195,27 @@ add_executable(vkDuckEditor
     # Editor core
     vulkan_editor/editor.cpp
 
+    # Asset management
+    vulkan_editor/asset/model_manager.cpp
+
     # Graph - node system
     vulkan_editor/graph/node.cpp
     vulkan_editor/graph/node_graph.cpp
     vulkan_editor/graph/link.cpp
+    vulkan_editor/graph/pin_registry.cpp
+    vulkan_editor/graph/validation_rules.cpp
     vulkan_editor/graph/pipeline_node.cpp
-    vulkan_editor/graph/model_node.cpp
+    # Singular model nodes moved to deprecated/ - using multi-model nodes instead
+    vulkan_editor/graph/multi_model_source_node.cpp
+    vulkan_editor/graph/multi_model_consumer_base.cpp
+    vulkan_editor/graph/multi_vertex_data_node.cpp
+    vulkan_editor/graph/multi_ubo_node.cpp
+    vulkan_editor/graph/multi_material_node.cpp
     vulkan_editor/graph/present_node.cpp
     vulkan_editor/graph/light_node.cpp
     vulkan_editor/graph/camera_node.cpp
     vulkan_editor/graph/fixed_camera_node.cpp
     vulkan_editor/graph/fps_camera_node.cpp
-    vulkan_editor/graph/default_renderer.cpp
-	vulkan_editor/graph/pin_registry.cpp
-	vulkan_editor/graph/validation_rules.cpp
 
     # Shader management
     vulkan_editor/shader/shader_manager.cpp
@@ -222,18 +229,28 @@ add_executable(vkDuckEditor
     vulkan_editor/io/directory_watcher.cpp
     vulkan_editor/io/model_watcher.cpp
 
-    # GPU resources
-    vulkan_editor/gpu/primitives.cpp
+    # GPU resources and memory (split primitives)
+    vulkan_editor/gpu/primitives/vertex_data.cpp
+    vulkan_editor/gpu/primitives/uniform_buffer.cpp
+    vulkan_editor/gpu/primitives/images.cpp
+    vulkan_editor/gpu/primitives/pipeline.cpp
+    vulkan_editor/gpu/primitives/descriptors.cpp
+    vulkan_editor/gpu/primitives/store.cpp
     vulkan_editor/gpu/batched_stager.cpp
     vulkan_editor/gpu/staging_buffer_pool.cpp
 
     # Utilities
     vulkan_editor/util/logger.cpp
 
+    # Configuration
+    vulkan_editor/config/vulkan_enums.cpp
+
     # UI
+    vulkan_editor/asset/asset_library_ui.cpp
     vulkan_editor/ui/pipeline_editor_ui.cpp
     vulkan_editor/ui/pipeline_settings_ui.cpp
-    vulkan_editor/ui/model_settings_ui.cpp
+    # model_settings_ui.cpp moved to ui/deprecated/ - using multi_model_settings_ui instead
+    vulkan_editor/ui/multi_model_settings_ui.cpp
     vulkan_editor/ui/camera_editor_ui.cpp
     vulkan_editor/ui/light_editor_ui.cpp
     vulkan_editor/ui/attachment_editor_ui.cpp
