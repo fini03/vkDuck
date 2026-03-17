@@ -412,6 +412,52 @@ void Image::generateStage(const Store& store, std::ostream& out) const {
             imageInfo.extent.height,
             string_VkFormat(imageInfo.format)
         );
+    }
+    // Inline pixel data (for small textures like 1x1 defaults)
+    else if (!inlineImageData.empty()) {
+        // Generate inline byte array
+        print(out, "// Stage inline texture: {0}\n{{\n", name);
+        print(out, "    std::array<uint8_t, {}> {}_data = {{{{", inlineImageData.size(), name);
+        for (size_t i = 0; i < inlineImageData.size(); ++i) {
+            if (i > 0) print(out, ", ");
+            print(out, "{}", static_cast<int>(inlineImageData[i]));
+        }
+        print(out, "}}}};\n");
+        print(out, "    VkDeviceSize {}_textureSize = {}_data.size();\n\n", name, name);
+
+        print(out,
+            "    // Create staging buffer\n"
+            "    VkBuffer {0}_stagingBuffer;\n"
+            "    VmaAllocation {0}_stagingAlloc;\n"
+            "    VmaAllocationInfo {0}_stagingAllocInfo;\n"
+            "    createBuffer(physicalDevice, device, allocator,\n"
+            "        {0}_textureSize,\n"
+            "        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,\n"
+            "        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,\n"
+            "        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,\n"
+            "        {0}_stagingBuffer, {0}_stagingAlloc, &{0}_stagingAllocInfo);\n"
+            "    memcpy({0}_stagingAllocInfo.pMappedData, {0}_data.data(), {0}_textureSize);\n"
+            "\n"
+            "    // Transition image to transfer destination layout\n"
+            "    transitionImageLayout(device, graphicsQueue, commandPool, {0},\n"
+            "        {3}, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);\n"
+            "\n"
+            "    // Copy staging buffer to image\n"
+            "    copyBufferToImage(device, graphicsQueue, commandPool, {0}_stagingBuffer, {0},\n"
+            "        {1}, {2});\n"
+            "\n"
+            "    // Transition image to shader read-only layout\n"
+            "    transitionImageLayout(device, graphicsQueue, commandPool, {0},\n"
+            "        {3}, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);\n"
+            "\n"
+            "    // Cleanup staging buffer\n"
+            "    vmaDestroyBuffer(allocator, {0}_stagingBuffer, {0}_stagingAlloc);\n"
+            "}}\n\n",
+            name,
+            imageInfo.extent.width,
+            imageInfo.extent.height,
+            string_VkFormat(imageInfo.format)
+        );
     } else {
         // Even without texture data, we need to transition to shader read-only layout
         // to avoid validation errors when the image is used in a descriptor set

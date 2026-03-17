@@ -560,6 +560,7 @@ void DescriptorSet::generateCreate(const Store& store, std::ostream& out) const 
         std::string resourceName;
         std::string resourceSize;
         std::vector<std::string> imageViewNames;
+        std::vector<std::string> uboNames;
         bool hasBinding = idx < bindings.size() && bindings[idx].isValid();
 
         if (hasBinding) {
@@ -572,10 +573,14 @@ void DescriptorSet::generateCreate(const Store& store, std::ostream& out) const 
                     }
                     resourceName = imageViewNames[0];
                 } else if (array.type == Type::UniformBuffer) {
-                    uint32_t resourceHandle = array.handles[0];
-                    const UniformBuffer& ubo = store.uniformBuffers[resourceHandle];
-                    resourceName = ubo.name;
-                    resourceSize = std::to_string(ubo.data.size());
+                    // Collect all UBO names for per-object descriptor sets
+                    for (uint32_t handle : array.handles) {
+                        const UniformBuffer& ubo = store.uniformBuffers[handle];
+                        uboNames.push_back(ubo.name);
+                    }
+                    resourceName = uboNames[0];
+                    const UniformBuffer& firstUbo = store.uniformBuffers[array.handles[0]];
+                    resourceSize = std::to_string(firstUbo.data.size());
                 } else if (array.type == Type::Camera) {
                     uint32_t resourceHandle = array.handles[0];
                     const Camera& cam = store.cameras[resourceHandle];
@@ -679,37 +684,79 @@ void DescriptorSet::generateCreate(const Store& store, std::ostream& out) const 
                 );
             }
         } else if (binding.type == Type::UniformBuffer) {
-            std::string bufferExpr = resourceName.empty()
-                ? std::format("VK_NULL_HANDLE /* TODO: set {}_binding{}_buffer */", name, binding.binding)
-                : resourceName;
             std::string rangeExpr = resourceSize.empty()
                 ? std::format("VK_WHOLE_SIZE /* TODO: set {}_binding{}_bufferSize */", name, binding.binding)
                 : resourceSize;
 
-            print(out,
-                "    // Write uniform buffer descriptor for binding {}\n"
-                "    for (uint32_t i = 0; i < {}_numSets; ++i) {{\n"
-                "        VkDescriptorBufferInfo {}_bufferInfo_{}{{\n"
-                "            .buffer = {},\n"
-                "            .offset = 0,\n"
-                "            .range = {}\n"
-                "        }};\n"
-                "        VkWriteDescriptorSet {}_write_{}{{\n"
-                "            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,\n"
-                "            .dstSet = {}_sets[i],\n"
-                "            .dstBinding = {},\n"
-                "            .dstArrayElement = 0,\n"
-                "            .descriptorCount = 1,\n"
-                "            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,\n"
-                "            .pBufferInfo = &{}_bufferInfo_{}\n"
-                "        }};\n"
-                "        vkUpdateDescriptorSets(device, 1, &{}_write_{}, 0, nullptr);\n"
-                "    }}\n\n",
-                binding.binding, name, name, binding.binding,
-                bufferExpr, rangeExpr, name, binding.binding,
-                name, binding.binding, name, binding.binding,
-                name, binding.binding
-            );
+            if (uboNames.size() > 1) {
+                // Per-object UBOs: create an array of buffers and use indexed access
+                print(out,
+                    "    // Array of UBO buffers for per-object uniforms (binding {})\n"
+                    "    std::array<VkBuffer, {}> {}_buffers_{} = {{{{\n",
+                    binding.binding, uboNames.size(), name, binding.binding
+                );
+                for (size_t i = 0; i < uboNames.size(); ++i) {
+                    print(out, "        {}", uboNames[i]);
+                    if (i < uboNames.size() - 1) print(out, ",");
+                    print(out, "\n");
+                }
+                print(out, "    }}}};\n\n");
+
+                print(out,
+                    "    // Write uniform buffer descriptor for binding {} (per-object UBOs)\n"
+                    "    for (uint32_t i = 0; i < {}_numSets; ++i) {{\n"
+                    "        VkDescriptorBufferInfo {}_bufferInfo_{}{{\n"
+                    "            .buffer = {}_buffers_{}[i],\n"
+                    "            .offset = 0,\n"
+                    "            .range = {}\n"
+                    "        }};\n"
+                    "        VkWriteDescriptorSet {}_write_{}{{\n"
+                    "            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,\n"
+                    "            .dstSet = {}_sets[i],\n"
+                    "            .dstBinding = {},\n"
+                    "            .dstArrayElement = 0,\n"
+                    "            .descriptorCount = 1,\n"
+                    "            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,\n"
+                    "            .pBufferInfo = &{}_bufferInfo_{}\n"
+                    "        }};\n"
+                    "        vkUpdateDescriptorSets(device, 1, &{}_write_{}, 0, nullptr);\n"
+                    "    }}\n\n",
+                    binding.binding, name, name, binding.binding,
+                    name, binding.binding, rangeExpr, name, binding.binding,
+                    name, binding.binding, name, binding.binding,
+                    name, binding.binding
+                );
+            } else {
+                // Single UBO: use the same buffer for all descriptor sets
+                std::string bufferExpr = resourceName.empty()
+                    ? std::format("VK_NULL_HANDLE /* TODO: set {}_binding{}_buffer */", name, binding.binding)
+                    : resourceName;
+
+                print(out,
+                    "    // Write uniform buffer descriptor for binding {}\n"
+                    "    for (uint32_t i = 0; i < {}_numSets; ++i) {{\n"
+                    "        VkDescriptorBufferInfo {}_bufferInfo_{}{{\n"
+                    "            .buffer = {},\n"
+                    "            .offset = 0,\n"
+                    "            .range = {}\n"
+                    "        }};\n"
+                    "        VkWriteDescriptorSet {}_write_{}{{\n"
+                    "            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,\n"
+                    "            .dstSet = {}_sets[i],\n"
+                    "            .dstBinding = {},\n"
+                    "            .dstArrayElement = 0,\n"
+                    "            .descriptorCount = 1,\n"
+                    "            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,\n"
+                    "            .pBufferInfo = &{}_bufferInfo_{}\n"
+                    "        }};\n"
+                    "        vkUpdateDescriptorSets(device, 1, &{}_write_{}, 0, nullptr);\n"
+                    "    }}\n\n",
+                    binding.binding, name, name, binding.binding,
+                    bufferExpr, rangeExpr, name, binding.binding,
+                    name, binding.binding, name, binding.binding,
+                    name, binding.binding
+                );
+            }
         }
     }
 
