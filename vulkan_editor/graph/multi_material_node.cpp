@@ -218,6 +218,8 @@ primitives::StoreHandle MultiMaterialNode::createDefaultTexture(
     auto& img = store.images[handle.handle];
     img.imageData = pixelStorage.data();
     img.imageSize = 4;
+    // Also store inline for code generation
+    img.inlineImageData = pixelStorage;
     img.extentType = ExtentType::Custom;
     img.imageInfo.format =
         linear ? VK_FORMAT_B8G8R8A8_UNORM : VK_FORMAT_B8G8R8A8_SRGB;

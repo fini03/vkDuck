@@ -393,6 +393,46 @@ void UniformBuffer::generateCreate(const Store& store, std::ostream& out) const 
         );
     }
 
+    // Initialize MaterialParams UBOs with actual material data
+    // MaterialParams size is 48 bytes (2 x vec4 + 2 x float + 2 x padding)
+    if (size == 48 && !data.empty()) {
+        // MaterialParams struct layout matches what's in the data span
+        auto params = reinterpret_cast<const float*>(data.data());
+
+        // Helper to format float with guaranteed decimal point
+        auto flt = [](float v) -> std::string {
+            auto s = std::format("{:g}", v);
+            if (s.find('.') == std::string::npos && s.find('e') == std::string::npos)
+                s += ".0";
+            return s + "f";
+        };
+
+        print(out,
+            "\n    // Initialize MaterialParams UBO with material data\n"
+            "    struct MaterialParams {{\n"
+            "        alignas(16) glm::vec4 baseColorFactor;\n"
+            "        alignas(16) glm::vec4 emissiveFactor;\n"
+            "        float metallicFactor;\n"
+            "        float roughnessFactor;\n"
+            "        float _padding0;\n"
+            "        float _padding1;\n"
+            "    }};\n"
+            "    MaterialParams {}_initData{{\n"
+            "        .baseColorFactor = glm::vec4({}, {}, {}, {}),\n"
+            "        .emissiveFactor = glm::vec4({}, {}, {}, {}),\n"
+            "        .metallicFactor = {},\n"
+            "        .roughnessFactor = {}\n"
+            "    }};\n"
+            "    memcpy({}_mapped, &{}_initData, sizeof(MaterialParams));\n",
+            name,
+            flt(params[0]), flt(params[1]), flt(params[2]), flt(params[3]),  // baseColorFactor
+            flt(params[4]), flt(params[5]), flt(params[6]), flt(params[7]),  // emissiveFactor
+            flt(params[8]),   // metallicFactor
+            flt(params[9]),   // roughnessFactor
+            name, name
+        );
+    }
+
     print(out, "}}\n\n");
 }
 

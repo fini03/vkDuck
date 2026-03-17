@@ -302,6 +302,9 @@ public:
     // For code generation: path to original image file (PNG, etc.) for wuffs loading
     std::string originalImagePath{};
 
+    // For code generation: inline pixel data for small textures (e.g., 1x1 defaults)
+    std::vector<uint8_t> inlineImageData{};
+
     // RECORD
     VkImage image{VK_NULL_HANDLE};
     VmaAllocation alloc{VK_NULL_HANDLE};
