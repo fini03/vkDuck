@@ -111,6 +111,12 @@ public:
     void registerPins(PinRegistry& registry) override;
     bool usesPinRegistry() const override { return usesRegistry_; }
 
+    // Pin lookup for O(1) findPin
+    PinLookup getPinById(ax::NodeEditor::PinId id) override {
+        if (modelSourcePin.id == id) return {&modelSourcePin, false};
+        return {};
+    }
+
     // Primitives (source node doesn't create GPU primitives directly)
     void clearPrimitives() override {}
     void createPrimitives(primitives::Store& store) override {}

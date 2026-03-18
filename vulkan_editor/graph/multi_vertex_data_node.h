@@ -31,6 +31,13 @@ public:
     void registerPins(PinRegistry& registry) override;
     bool usesPinRegistry() const override { return usesRegistry_; }
 
+    // Pin lookup for O(1) findPin
+    PinLookup getPinById(ax::NodeEditor::PinId id) override {
+        if (auto result = MultiModelConsumerBase::getPinById(id)) return result;
+        if (vertexDataPin.id == id) return {&vertexDataPin, false};
+        return {};
+    }
+
     void clearPrimitives() override;
     void createPrimitives(primitives::Store& store) override;
     void getOutputPrimitives(

@@ -60,6 +60,9 @@ public:
     void registerPins(PinRegistry& registry) override;
     bool usesPinRegistry() const override { return usesRegistry; }
 
+    // Fast O(1) pin lookup by ID
+    PinLookup getPinById(ax::NodeEditor::PinId id) override;
+
     // Re-register pins after shader reflection updates
     void reregisterPins(PinRegistry& registry);
 

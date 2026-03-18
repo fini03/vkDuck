@@ -46,141 +46,18 @@ PinEntry* NodeGraph::findPinEntry(ax::NodeEditor::PinId id) {
     return pinRegistry.findByEditorId(id);
 }
 
-// Helper to find a pin and its parent node
-// TODO: Refactor to use PinRegistry for O(1) lookup. Current implementation
-// uses dynamic_cast chains which is O(n*m) where n=nodes and m=node_types.
-// Migration plan:
-// 1. Have all node types implement registerPins() to register pins in PinRegistry
-// 2. Modify findPin() to use pinRegistry.findByEditorId() for O(1) lookup
-// 3. Use PinEntry::ownerNodeId to find the node, then retrieve pin via virtual method
-// See findPinEntry() for O(1) lookup when only PinEntry info is needed.
+// Helper to find a pin and its parent node.
+// Uses virtual getPinById() dispatch (O(n) node iteration, no dynamic_cast overhead).
+// For O(1) lookup when only PinEntry info is needed, see findPinEntry().
 PinLookupResult NodeGraph::findPin(ax::NodeEditor::PinId id) {
-    // Try fast path via registry first (for nodes that have migrated)
-    if (const PinEntry* entry = pinRegistry.findByEditorId(id); entry && entry->valid) {
-        for (const auto& node : nodes) {
-            if (node->getId() == entry->ownerNodeId) {
-                // Node found - but we still need the actual Pin* from the node
-                // For now, continue to fallback below to get the real pin pointer
-                // TODO: Add virtual method to nodes to get Pin* by PinId
-                break;
-            }
-        }
-    }
-
-    // Fallback: iterate through all nodes (O(n) with dynamic_cast overhead)
+    // Use virtual method dispatch to find the pin
     for (const auto& node : nodes) {
-        // --- Handle all Camera types (Orbital, Fixed) ---
-        if (auto* camera = dynamic_cast<CameraNodeBase*>(node.get())) {
-            if (camera->cameraPin.id == id)
-                return {
-                    camera, &camera->cameraPin, NodePinKind::Output
-                };
-        }
-
-        // --- Handle LightNode ---
-        if (auto* light = dynamic_cast<LightNode*>(node.get())) {
-            if (light->lightArrayPin.id == id)
-                return {
-                    light, &light->lightArrayPin, NodePinKind::Output
-                };
-        }
-
-        // --- Handle MultiModelSourceNode ---
-        if (auto* multiSource = dynamic_cast<MultiModelSourceNode*>(node.get())) {
-            if (multiSource->modelSourcePin.id == id)
-                return {multiSource, &multiSource->modelSourcePin, NodePinKind::Output};
-        }
-
-        // --- Handle MultiVertexDataNode ---
-        if (auto* multiVertex = dynamic_cast<MultiVertexDataNode*>(node.get())) {
-            if (multiVertex->sourceInputPin.id == id)
-                return {multiVertex, &multiVertex->sourceInputPin, NodePinKind::Input};
-            if (multiVertex->vertexDataPin.id == id)
-                return {multiVertex, &multiVertex->vertexDataPin, NodePinKind::Output};
-        }
-
-        // --- Handle MultiUBONode ---
-        if (auto* multiUbo = dynamic_cast<MultiUBONode*>(node.get())) {
-            if (multiUbo->sourceInputPin.id == id)
-                return {multiUbo, &multiUbo->sourceInputPin, NodePinKind::Input};
-            if (multiUbo->modelMatrixPin.id == id)
-                return {multiUbo, &multiUbo->modelMatrixPin, NodePinKind::Output};
-            if (multiUbo->cameraPin.id == id)
-                return {multiUbo, &multiUbo->cameraPin, NodePinKind::Output};
-            if (multiUbo->lightPin.id == id)
-                return {multiUbo, &multiUbo->lightPin, NodePinKind::Output};
-        }
-
-        // --- Handle MultiMaterialNode ---
-        if (auto* multiMat = dynamic_cast<MultiMaterialNode*>(node.get())) {
-            if (multiMat->sourceInputPin.id == id)
-                return {multiMat, &multiMat->sourceInputPin, NodePinKind::Input};
-            if (multiMat->baseColorPin.id == id)
-                return {multiMat, &multiMat->baseColorPin, NodePinKind::Output};
-            if (multiMat->emissivePin.id == id)
-                return {multiMat, &multiMat->emissivePin, NodePinKind::Output};
-            if (multiMat->metallicRoughnessPin.id == id)
-                return {multiMat, &multiMat->metallicRoughnessPin, NodePinKind::Output};
-            if (multiMat->normalPin.id == id)
-                return {multiMat, &multiMat->normalPin, NodePinKind::Output};
-            if (multiMat->materialParamsPin.id == id)
-                return {multiMat, &multiMat->materialParamsPin, NodePinKind::Output};
-        }
-
-        // --- Handle PipelineNode ---
-        if (auto* pipeline = dynamic_cast<PipelineNode*>(node.get())) {
-            if (pipeline->vertexDataPin.id.Get() != 0 &&
-                pipeline->vertexDataPin.id == id) {
-                return {
-                    pipeline, &pipeline->vertexDataPin,
-                    NodePinKind::Input
-                };
-            }
-
-            // Check regular input bindings
-            for (auto& binding : pipeline->inputBindings) {
-                if (binding.pin.id == id)
-                    return {pipeline, &binding.pin, NodePinKind::Input};
-            }
-
-            // Check output attachments
-            for (auto& config :
-                 pipeline->shaderReflection.attachmentConfigs) {
-                if (config.pin.id == id)
-                    return {pipeline, &config.pin, NodePinKind::Output};
-            }
-
-            // Check single camera pin
-            if (pipeline->hasCameraInput &&
-                pipeline->cameraInput.pin.id == id) {
-                return {
-                    pipeline, &pipeline->cameraInput.pin,
-                    NodePinKind::Input
-                };
-            }
-
-            // Check single light pin
-            if (pipeline->hasLightInput &&
-                pipeline->lightInput.pin.id == id) {
-                return {
-                    pipeline, &pipeline->lightInput.pin,
-                    NodePinKind::Input
-                };
-            }
-
-            // Check attachment input pins (for shared render pass)
-            for (auto& attIn : pipeline->attachmentInputs) {
-                if (attIn.pin.id == id)
-                    return {pipeline, &attIn.pin, NodePinKind::Input};
-            }
-        }
-
-        // --- Handle PresentNode ---
-        if (auto* present = dynamic_cast<PresentNode*>(node.get())) {
-            if (present->imagePin.id == id)
-                return {
-                    present, &present->imagePin, NodePinKind::Input
-                };
+        if (auto lookup = node->getPinById(id); lookup) {
+            return {
+                node.get(),
+                lookup.pin,
+                lookup.isInput ? NodePinKind::Input : NodePinKind::Output
+            };
         }
     }
     return {nullptr, nullptr, NodePinKind::None};

@@ -40,6 +40,13 @@ public:
     Pin sourceInputPin;
     PinHandle sourceInputPinHandle = INVALID_PIN_HANDLE;
 
+    // Pin lookup for O(1) findPin - checks source input pin
+    // Derived classes should call this then check their own pins
+    PinLookup getPinById(ax::NodeEditor::PinId id) override {
+        if (sourceInputPin.id == id) return {&sourceInputPin, true};
+        return {};
+    }
+
 protected:
     // Register the source input pin (call from derived registerPins)
     void registerSourceInputPin(PinRegistry& registry);

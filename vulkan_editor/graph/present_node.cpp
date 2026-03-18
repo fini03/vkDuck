@@ -21,6 +21,11 @@ PresentNode::PresentNode(int id)
 
 PresentNode::~PresentNode() {}
 
+Node::PinLookup PresentNode::getPinById(ax::NodeEditor::PinId id) {
+    if (imagePin.id == id) return {&imagePin, true};
+    return {};
+}
+
 nlohmann::json PresentNode::toJson() const {
     nlohmann::json j;
     j["type"] = "present";

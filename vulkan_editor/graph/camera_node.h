@@ -44,6 +44,12 @@ public:
     void registerPins(PinRegistry& registry) override;
     bool usesPinRegistry() const override { return usesRegistry; }
 
+    // Pin lookup for O(1) findPin
+    PinLookup getPinById(ax::NodeEditor::PinId id) override {
+        if (cameraPin.id == id) return {&cameraPin, false};
+        return {};
+    }
+
     // Camera controller from vkDuck library (handles all camera math)
     CameraController controller;
 

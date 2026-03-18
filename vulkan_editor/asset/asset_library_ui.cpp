@@ -182,7 +182,15 @@ void AssetLibraryUI::drawAvailableModels() {
     // Display models
     for (size_t i = 0; i < filteredModels.size(); ++i) {
         const auto& path = filteredModels[i];
-        std::string displayName = path.filename().string();
+        // Show path relative to data/models/ for subdirectory support
+        std::string displayName;
+        std::filesystem::path modelsPrefix = std::filesystem::path("data") / "models";
+        if (path.string().starts_with(modelsPrefix.string())) {
+            auto relativePath = std::filesystem::relative(path, modelsPrefix);
+            displayName = relativePath.string();
+        } else {
+            displayName = path.filename().string();
+        }
 
         // Use path hash as unique ID to avoid conflicts with same filenames
         ImGui::PushID(static_cast<int>(std::hash<std::string>{}(path.string())));

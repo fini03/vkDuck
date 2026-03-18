@@ -2,15 +2,38 @@
 #include "vulkan_editor/graph/light_node.h"
 #include "vulkan_editor/graph/multi_ubo_node.h"
 #include "vulkan_editor/graph/multi_model_source_node.h"
+#include "vulkan_editor/graph/pipeline_node.h"
 #include "vulkan_editor/graph/node_graph.h"
 #include "vulkan_editor/asset/model_manager.h"
 #include <vkDuck/model_loader.h>
 #include <numbers>
 #include <vector>
 
+// Find the maximum light count from connected pipeline shader
+static int findMaxLightsFromPipeline(LightNode* lightNode, NodeGraph* graph) {
+    if (!graph) return 0;
+
+    // Find if this light node's output is connected to a pipeline's light input
+    for (const auto& link : graph->links) {
+        if (link.startPin == lightNode->lightArrayPin.id) {
+            auto endResult = graph->findPin(link.endPin);
+            if (auto* pipeline = dynamic_cast<PipelineNode*>(endResult.node)) {
+                if (pipeline->hasLightInput &&
+                    pipeline->lightInput.pin.id == link.endPin) {
+                    return pipeline->lightInput.arraySize;
+                }
+            }
+        }
+    }
+    return 0; // Not connected or no limit
+}
+
 void LightEditorUI::Draw(LightNode* lightNode, MultiUBONode* uboNode, NodeGraph* graph) {
     if (!lightNode)
         return;
+
+    // Get max lights from connected pipeline (0 = no limit)
+    int maxLights = findMaxLightsFromPipeline(lightNode, graph);
 
     // GLTF Lights import section (if UBO node has lights from source)
     MultiModelSourceNode* source = (uboNode && graph) ? uboNode->findSourceNode(*graph) : nullptr;
@@ -110,24 +133,26 @@ void LightEditorUI::Draw(LightNode* lightNode, MultiUBONode* uboNode, NodeGraph*
 
     ImGui::SeparatorText("Light Array Settings");
 
-    // Number of lights - read-only when controlled by shader
-    if (lightNode->shaderControlledCount) {
-        ImGui::BeginDisabled();
-        int count = lightNode->numLights;
-        ImGui::InputInt("Number of Lights", &count);
-        ImGui::EndDisabled();
-        ImGui::TextColored(
-            ImVec4(0.7f, 0.7f, 0.3f, 1.0f),
-            "Light count controlled by connected shader"
-        );
-    } else {
-        int prevNumLights = lightNode->numLights;
-        ImGui::InputInt("Number of Lights", &lightNode->numLights);
-        if (lightNode->numLights < 1) lightNode->numLights = 1;
+    // Number of lights - user-controlled with shader max limit
+    int prevNumLights = lightNode->numLights;
+    ImGui::InputInt("Number of Lights", &lightNode->numLights);
+    if (lightNode->numLights < 1) lightNode->numLights = 1;
 
-        if (prevNumLights != lightNode->numLights) {
-            lightNode->ensureLightCount();
-        }
+    // Clamp to shader's max if connected to a pipeline
+    if (maxLights > 0 && lightNode->numLights > maxLights) {
+        lightNode->numLights = maxLights;
+    }
+
+    if (prevNumLights != lightNode->numLights) {
+        lightNode->ensureLightCount();
+    }
+
+    // Show max limit info when connected
+    if (maxLights > 0) {
+        ImGui::TextColored(
+            ImVec4(0.6f, 0.8f, 0.6f, 1.0f),
+            "Max lights from shader: %d", maxLights
+        );
     }
 
     // Presets

@@ -39,15 +39,17 @@ public:
     void registerPins(PinRegistry& registry) override;
     bool usesPinRegistry() const override { return usesRegistry; }
 
+    // Pin lookup for O(1) findPin
+    PinLookup getPinById(ax::NodeEditor::PinId id) override {
+        if (lightArrayPin.id == id) return {&lightArrayPin, false};
+        return {};
+    }
+
     void ensureLightCount();
 
-    // Light array configuration - dynamic size
+    // Light array configuration - user-controlled dynamic size
     primitives::LightsBuffer lightsBuffer;
     int numLights{6};  // User-configurable count (no limit)
-
-    // When connected to a pipeline, this is true and numLights is
-    // read-only
-    bool shaderControlledCount{false};
 
     // Legacy pin (kept for backwards compatibility)
     Pin lightArrayPin;

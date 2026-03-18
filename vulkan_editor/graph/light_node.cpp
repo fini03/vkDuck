@@ -39,7 +39,6 @@ nlohmann::json LightNode::toJson() const {
 
     // Light parameters
     j["numLights"] = numLights;
-    j["shaderControlledCount"] = shaderControlledCount;
 
     // Serialize light data array
     nlohmann::json lightsJson = nlohmann::json::array();
@@ -76,7 +75,7 @@ void LightNode::fromJson(const nlohmann::json& j) {
 
     // Light parameters
     numLights = j.value("numLights", 1);
-    shaderControlledCount = j.value("shaderControlledCount", false);
+    // shaderControlledCount is deprecated - light count is always user-controlled
 
     // Restore lights array
     lightsBuffer.lights.clear();

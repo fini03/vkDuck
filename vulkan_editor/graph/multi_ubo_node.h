@@ -35,6 +35,15 @@ public:
     void registerPins(PinRegistry& registry) override;
     bool usesPinRegistry() const override { return usesRegistry_; }
 
+    // Pin lookup for O(1) findPin
+    PinLookup getPinById(ax::NodeEditor::PinId id) override {
+        if (auto result = MultiModelConsumerBase::getPinById(id)) return result;
+        if (modelMatrixPin.id == id) return {&modelMatrixPin, false};
+        if (cameraPin.id == id) return {&cameraPin, false};
+        if (lightPin.id == id) return {&lightPin, false};
+        return {};
+    }
+
     void clearPrimitives() override;
     void createPrimitives(primitives::Store& store) override;
     void getOutputPrimitives(

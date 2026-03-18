@@ -102,6 +102,19 @@ public:
      */
     virtual bool usesPinRegistry() const { return false; }
 
+    /**
+     * Find a pin on this node by its editor ID.
+     * Returns a pair of (Pin*, isInput) if found, or (nullptr, false) if not.
+     * Override this in subclasses to enable O(1) pin lookup in NodeGraph::findPin().
+     */
+    struct PinLookup {
+        ShaderTypes::Pin* pin = nullptr;
+        bool isInput = false;
+
+        explicit operator bool() const { return pin != nullptr; }
+    };
+    virtual PinLookup getPinById(ax::NodeEditor::PinId id) { return {}; }
+
     static int GetNextGlobalId() {
         return ++s_GlobalIdCounter;
     }

@@ -180,6 +180,43 @@ void PipelineNode::reregisterPins(PinRegistry& registry) {
 
 PipelineNode::~PipelineNode() {}
 
+Node::PinLookup PipelineNode::getPinById(ax::NodeEditor::PinId id) {
+    // Check vertex data input pin
+    if (vertexDataPin.id == id) return {&vertexDataPin, true};
+
+    // Check input bindings
+    for (auto& binding : inputBindings) {
+        if (binding.pin.id == id) return {&binding.pin, true};
+    }
+
+    // Check output bindings
+    for (auto& binding : outputBindings) {
+        if (binding.pin.id == id) return {&binding.pin, false};
+    }
+
+    // Check attachment output configs
+    for (auto& config : shaderReflection.attachmentConfigs) {
+        if (config.pin.id == id) return {&config.pin, false};
+    }
+
+    // Check camera input
+    if (hasCameraInput && cameraInput.pin.id == id) {
+        return {&cameraInput.pin, true};
+    }
+
+    // Check light input
+    if (hasLightInput && lightInput.pin.id == id) {
+        return {&lightInput.pin, true};
+    }
+
+    // Check attachment inputs (for shared render pass support)
+    for (auto& attachInput : attachmentInputs) {
+        if (attachInput.pin.id == id) return {&attachInput.pin, true};
+    }
+
+    return {};
+}
+
 nlohmann::json PipelineNode::toJson() const {
     nlohmann::json j;
     j["type"] = "pipeline";
@@ -1204,59 +1241,7 @@ bool PipelineNode::updateShaderReflection(
     // This must happen after reconcilePins() updates the Pin objects
     reregisterPins(graph.pinRegistry);
 
-    // Sync connected LightNode's count when shader is updated
-    if (hasLightInput && lightInput.arraySize > 0) {
-        Log::debug(
-            "Shader",
-            "Looking for connected LightNode - lightInput.pin.id={}, "
-            "arraySize={}, links count={}",
-            lightInput.pin.id.Get(), lightInput.arraySize,
-            graph.links.size()
-        );
-
-        // Find if there's a LightNode connected to our light input pin
-        bool foundLink = false;
-        for (const auto& link : graph.links) {
-            Log::debug(
-                "Shader", "  Checking link: start={}, end={}",
-                link.startPin.Get(), link.endPin.Get()
-            );
-
-            if (link.endPin == lightInput.pin.id) {
-                foundLink = true;
-                auto startResult = graph.findPin(link.startPin);
-                if (auto* lightNode =
-                        dynamic_cast<LightNode*>(startResult.node)) {
-                    Log::debug(
-                        "Shader",
-                        "  Found connected LightNode with {} lights",
-                        lightNode->numLights
-                    );
-                    if (lightNode->numLights != lightInput.arraySize) {
-                        Log::info(
-                            "Shader",
-                            "Shader updated: syncing LightNode count "
-                            "from {} to {}",
-                            lightNode->numLights, lightInput.arraySize
-                        );
-                        lightNode->numLights = lightInput.arraySize;
-                        lightNode->shaderControlledCount = true;
-                        lightNode->ensureLightCount();
-                    }
-                } else {
-                    Log::debug(
-                        "Shader", "  Link found but not a LightNode"
-                    );
-                }
-                break;
-            }
-        }
-        if (!foundLink) {
-            Log::debug(
-                "Shader", "  No link found matching lightInput.pin.id"
-            );
-        }
-    }
+    // Light count is user-controlled - shader uses numLights header for dynamic sizing
 
     return true; // Shader compilation and reflection succeeded
 }

@@ -39,6 +39,17 @@ public:
     void registerPins(PinRegistry& registry) override;
     bool usesPinRegistry() const override { return usesRegistry_; }
 
+    // Pin lookup for O(1) findPin
+    PinLookup getPinById(ax::NodeEditor::PinId id) override {
+        if (auto result = MultiModelConsumerBase::getPinById(id)) return result;
+        if (baseColorPin.id == id) return {&baseColorPin, false};
+        if (metallicRoughnessPin.id == id) return {&metallicRoughnessPin, false};
+        if (normalPin.id == id) return {&normalPin, false};
+        if (emissivePin.id == id) return {&emissivePin, false};
+        if (materialParamsPin.id == id) return {&materialParamsPin, false};
+        return {};
+    }
+
     void clearPrimitives() override;
     void createPrimitives(primitives::Store& store) override;
     void getOutputPrimitives(

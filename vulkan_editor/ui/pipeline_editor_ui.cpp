@@ -295,42 +295,7 @@ void PipelineEditorUI::CreateNewLink(
     link.startPin = startId;
     link.endPin = endId;
     graph.addLink(link);
-
-    // Sync light count when LightNode connects to PipelineNode's light
-    // input
-    auto startResult = graph.findPin(startId);
-    auto endResult = graph.findPin(endId);
-
-    // Check if this is a LightNode -> PipelineNode connection
-    LightNode* lightNode = nullptr;
-    PipelineNode* pipelineNode = nullptr;
-
-    if (auto* light = dynamic_cast<LightNode*>(startResult.node)) {
-        lightNode = light;
-    }
-    if (auto* pipeline = dynamic_cast<PipelineNode*>(endResult.node)) {
-        // Check if the end pin is the pipeline's light input
-        if (pipeline->hasLightInput &&
-            pipeline->lightInput.pin.id == endId) {
-            pipelineNode = pipeline;
-        }
-    }
-
-    // If we found a valid LightNode -> Pipeline light connection, sync
-    // the count
-    if (lightNode && pipelineNode) {
-        int expectedLights = pipelineNode->lightInput.arraySize;
-        if (expectedLights > 0) {
-            Log::info(
-                "Node Editor",
-                "Syncing LightNode count from {} to {} (from shader)",
-                lightNode->numLights, expectedLights
-            );
-            lightNode->numLights = expectedLights;
-            lightNode->shaderControlledCount = true; // Lock the count
-            lightNode->ensureLightCount();
-        }
-    }
+    // Light count is user-controlled - shader uses numLights header for dynamic sizing
 }
 
 void PipelineEditorUI::ShowIncompatiblePinsTooltip() {
@@ -391,39 +356,6 @@ void PipelineEditorUI::DeleteLinks() {
     ed::LinkId linkId = 0;
     while (ed::QueryDeletedLink(&linkId)) {
         if (ed::AcceptDeletedItem()) {
-            // Before removing, check if this was a LightNode ->
-            // Pipeline connection to reset the shaderControlledCount
-            // flag
-            for (const auto& link : graph.links) {
-                if (link.id == linkId) {
-                    auto startResult = graph.findPin(link.startPin);
-                    auto endResult = graph.findPin(link.endPin);
-
-                    if (auto* lightNode = dynamic_cast<LightNode*>(
-                            startResult.node
-                        )) {
-                        if (auto* pipeline =
-                                dynamic_cast<PipelineNode*>(
-                                    endResult.node
-                                )) {
-                            if (pipeline->hasLightInput &&
-                                pipeline->lightInput.pin.id ==
-                                    link.endPin) {
-                                // Reset the shader control flag
-                                lightNode->shaderControlledCount =
-                                    false;
-                                Log::info(
-                                    "Node Editor",
-                                    "LightNode disconnected from "
-                                    "pipeline, light count now editable"
-                                );
-                            }
-                        }
-                    }
-                    break;
-                }
-            }
-
             graph.removeLink(linkId);
         }
     }
