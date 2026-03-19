@@ -72,9 +72,9 @@ private:
     void shutdownFileWatcher();
     void initializeDirectoryWatchers();
     void shutdownDirectoryWatchers();
-    void onShaderFileChanged(const std::string& filepath);
-    void onModelDirectoryChanged(const std::string& filepath, const std::string& filename, DirectoryWatcher::FileAction action);
-    void onStateDirectoryChanged(const std::string& filepath, const std::string& filename, DirectoryWatcher::FileAction action);
+    void onShaderFileChanged(const std::filesystem::path& filepath);
+    void onModelDirectoryChanged(const std::filesystem::path& filepath, const std::filesystem::path& filename, DirectoryWatcher::FileAction action);
+    void onStateDirectoryChanged(const std::filesystem::path& filepath, const std::filesystem::path& filename, DirectoryWatcher::FileAction action);
     void queueReload(const std::string& filepath);
     std::vector<PipelineNode*> findPipelinesUsingShader(
         const std::string& shaderPath,

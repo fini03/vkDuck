@@ -105,7 +105,7 @@ void ShaderManager::initializeFileWatcher() {
 
         // Set up callback for file changes
         fileWatcher->setReloadCallback(
-            [this](const std::string& filepath) {
+            [this](const std::filesystem::path& filepath) {
                 this->onShaderFileChanged(filepath);
             }
         );
@@ -153,7 +153,7 @@ void ShaderManager::initializeDirectoryWatchers() {
         try {
             modelDirectoryWatcher = std::make_unique<DirectoryWatcher>("ModelDirWatcher");
             modelDirectoryWatcher->setFileChangeCallback(
-                [this](const std::string& filepath, const std::string& filename, DirectoryWatcher::FileAction action) {
+                [this](const std::filesystem::path& filepath, const std::filesystem::path& filename, DirectoryWatcher::FileAction action) {
                     this->onModelDirectoryChanged(filepath, filename, action);
                 }
             );
@@ -186,7 +186,7 @@ void ShaderManager::initializeDirectoryWatchers() {
         try {
             stateDirectoryWatcher = std::make_unique<DirectoryWatcher>("StateDirWatcher");
             stateDirectoryWatcher->setFileChangeCallback(
-                [this](const std::string& filepath, const std::string& filename, DirectoryWatcher::FileAction action) {
+                [this](const std::filesystem::path& filepath, const std::filesystem::path& filename, DirectoryWatcher::FileAction action) {
                     this->onStateDirectoryChanged(filepath, filename, action);
                 }
             );
@@ -223,22 +223,22 @@ void ShaderManager::shutdownDirectoryWatchers() {
 }
 
 void ShaderManager::onModelDirectoryChanged(
-    const std::string& filepath,
-    const std::string& filename,
+    const std::filesystem::path& filepath,
+    const std::filesystem::path& filename,
     DirectoryWatcher::FileAction action
 ) {
     switch (action) {
     case DirectoryWatcher::FileAction::Added:
-        Log::info("ShaderManager", "New model detected: {}", filename);
+        Log::info("ShaderManager", "New model detected: {}", filename.string());
         break;
     case DirectoryWatcher::FileAction::Deleted:
-        Log::info("ShaderManager", "Model deleted: {}", filename);
+        Log::info("ShaderManager", "Model deleted: {}", filename.string());
         break;
     case DirectoryWatcher::FileAction::Modified:
-        Log::info("ShaderManager", "Model modified: {}", filename);
+        Log::info("ShaderManager", "Model modified: {}", filename.string());
         break;
     case DirectoryWatcher::FileAction::Moved:
-        Log::info("ShaderManager", "Model moved: {}", filename);
+        Log::info("ShaderManager", "Model moved: {}", filename.string());
         break;
     }
 
@@ -247,22 +247,22 @@ void ShaderManager::onModelDirectoryChanged(
 }
 
 void ShaderManager::onStateDirectoryChanged(
-    const std::string& filepath,
-    const std::string& filename,
+    const std::filesystem::path& filepath,
+    const std::filesystem::path& filename,
     DirectoryWatcher::FileAction action
 ) {
     switch (action) {
     case DirectoryWatcher::FileAction::Added:
-        Log::info("ShaderManager", "New state file detected: {}", filename);
+        Log::info("ShaderManager", "New state file detected: {}", filename.string());
         break;
     case DirectoryWatcher::FileAction::Deleted:
-        Log::info("ShaderManager", "State file deleted: {}", filename);
+        Log::info("ShaderManager", "State file deleted: {}", filename.string());
         break;
     case DirectoryWatcher::FileAction::Modified:
-        Log::info("ShaderManager", "State file modified: {}", filename);
+        Log::info("ShaderManager", "State file modified: {}", filename.string());
         break;
     case DirectoryWatcher::FileAction::Moved:
-        Log::info("ShaderManager", "State file moved: {}", filename);
+        Log::info("ShaderManager", "State file moved: {}", filename.string());
         break;
     }
 
@@ -336,14 +336,14 @@ bool ShaderManager::isStateWatchingEnabled() const {
     return stateWatchingEnabled && stateDirectoryWatcher && stateDirectoryWatcher->isWatching();
 }
 
-void ShaderManager::onShaderFileChanged(const std::string& filepath) {
+void ShaderManager::onShaderFileChanged(const std::filesystem::path& filepath) {
     if (!autoReloadEnabled) {
         return;
     }
 
     namespace fs = std::filesystem;
 
-    Log::debug("ShaderManager", "Detected change in: {}", filepath);
+    Log::debug("ShaderManager", "Detected change in: {}", filepath.string());
 
     // Convert absolute path to project-relative path
     fs::path absPath = fs::absolute(filepath);

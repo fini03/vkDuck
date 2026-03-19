@@ -515,7 +515,7 @@ void ModelManager::setupFileWatcher(CachedModel& model) {
     model.fileWatcher->setReloadCallback([this, handle](const std::filesystem::path& filepath) {
         std::lock_guard lock(mutex_);
         if (auto* m = cache_[handle].get()) {
-            Log::info(LOG_CATEGORY, "File change detected: {}", filepath);
+            Log::info(LOG_CATEGORY, "File change detected: {}", filepath.string());
             m->pendingReload = true;
         }
     });
