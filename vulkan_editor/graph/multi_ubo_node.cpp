@@ -424,5 +424,7 @@ void MultiUBONode::updateLightsFromMerged() {
                    light.position.z, light.intensity);
     }
 
+    // Set header to actual light count before GPU update
+    lightsBuffer_.header.numLights = static_cast<int32_t>(lights.size());
     lightsBuffer_.updateGpuBuffer();
 }

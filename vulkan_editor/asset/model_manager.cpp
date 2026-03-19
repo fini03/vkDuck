@@ -165,7 +165,7 @@ void ModelManager::setupDirectoryWatcher() {
 
     // Set up callbacks
     directoryWatcher_->setFileChangeCallback(
-        [this](const std::string& filepath, const std::string& filename, DirectoryWatcher::FileAction action) {
+        [this](const std::filesystem::path& filepath, const std::filesystem::path& filename, DirectoryWatcher::FileAction action) {
             handleDirectoryChange(filepath, filename, action);
         }
     );
@@ -176,30 +176,27 @@ void ModelManager::setupDirectoryWatcher() {
 
     // Start watching with model file extensions
     directoryWatcher_->watchDirectory(
-        modelsDir.string(),
+        modelsDir,
         {".gltf", ".glb", ".obj"},
         true  // recursive
     );
 
-    Log::info(LOG_CATEGORY, "Started watching models directory: {}", modelsDir.string());
+    Log::info(LOG_CATEGORY, "Started watching models directory: {}", modelsDir);
 }
 
 void ModelManager::handleDirectoryChange(
-    const std::string& filepath,
-    const std::string& filename,
+    const std::filesystem::path& filepath,
+    const std::filesystem::path& filename,
     DirectoryWatcher::FileAction action
 ) {
     // Convert absolute path to relative path
-    fs::path absolutePath(filepath);
     fs::path relativePath;
     try {
-        relativePath = fs::relative(absolutePath, projectRoot_);
+        relativePath = fs::relative(filepath, projectRoot_);
     } catch (const std::exception& e) {
         Log::warning(LOG_CATEGORY, "Failed to get relative path for {}: {}", filepath, e.what());
         return;
     }
-
-    std::string pathKey = relativePath.string();
 
     switch (action) {
         case DirectoryWatcher::FileAction::Added:
@@ -211,7 +208,7 @@ void ModelManager::handleDirectoryChange(
             Log::info(LOG_CATEGORY, "Model file deleted: {}", filename);
             // Mark for unload if it was cached
             std::lock_guard lock(mutex_);
-            auto it = pathToHandle_.find(pathKey);
+            auto it = pathToHandle_.find(relativePath);
             if (it != pathToHandle_.end()) {
                 ModelHandle handle = it->second;
                 if (auto cacheIt = cache_.find(handle); cacheIt != cache_.end()) {
@@ -229,7 +226,7 @@ void ModelManager::handleDirectoryChange(
             Log::info(LOG_CATEGORY, "Model file modified: {}", filename);
             // Mark for reload if it was cached
             std::lock_guard lock(mutex_);
-            auto it = pathToHandle_.find(pathKey);
+            auto it = pathToHandle_.find(relativePath);
             if (it != pathToHandle_.end()) {
                 ModelHandle handle = it->second;
                 if (auto cacheIt = cache_.find(handle); cacheIt != cache_.end()) {
@@ -278,7 +275,7 @@ void ModelManager::cleanupStaleCacheEntries() {
     for (ModelHandle handle : toRemove) {
         auto it = cache_.find(handle);
         if (it != cache_.end()) {
-            pathToHandle_.erase(it->second->path.string());
+            pathToHandle_.erase(it->second->path);
             cache_.erase(it);
         }
     }
@@ -289,16 +286,14 @@ void ModelManager::cleanupStaleCacheEntries() {
 }
 
 ModelHandle ModelManager::findOrCreateHandle(const fs::path& relativePath) {
-    std::string pathKey = relativePath.string();
-
-    auto it = pathToHandle_.find(pathKey);
+    auto it = pathToHandle_.find(relativePath);
     if (it != pathToHandle_.end()) {
         return it->second;
     }
 
     // Create new handle
     ModelHandle handle{nextHandleId_++};
-    pathToHandle_[pathKey] = handle;
+    pathToHandle_[relativePath] = handle;
 
     // Create cache entry
     auto model = std::make_unique<CachedModel>();
@@ -574,7 +569,7 @@ CachedModel* ModelManager::getModel(ModelHandle handle) {
 const CachedModel* ModelManager::getModelByPath(const fs::path& relativePath) const {
     std::lock_guard lock(mutex_);
 
-    auto it = pathToHandle_.find(relativePath.string());
+    auto it = pathToHandle_.find(relativePath);
     if (it != pathToHandle_.end()) {
         auto cacheIt = cache_.find(it->second);
         if (cacheIt != cache_.end() && cacheIt->second->status == ModelStatus::Loaded) {
@@ -659,7 +654,7 @@ bool ModelManager::unloadModel(ModelHandle handle, bool force) {
     }
 
     // Remove from path mapping
-    pathToHandle_.erase(model->path.string());
+    pathToHandle_.erase(model->path);
 
     // Remove from cache
     cache_.erase(it);
@@ -683,7 +678,7 @@ void ModelManager::unloadUnusedModels() {
         auto it = cache_.find(handle);
         if (it != cache_.end()) {
             Log::info(LOG_CATEGORY, "Unloading unused model: {}", it->second->displayName);
-            pathToHandle_.erase(it->second->path.string());
+            pathToHandle_.erase(it->second->path);
             cache_.erase(it);
         }
     }
@@ -836,7 +831,7 @@ void ModelManager::clearCache(bool force) {
         for (ModelHandle handle : toRemove) {
             auto it = cache_.find(handle);
             if (it != cache_.end()) {
-                pathToHandle_.erase(it->second->path.string());
+                pathToHandle_.erase(it->second->path);
                 cache_.erase(it);
             }
         }

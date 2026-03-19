@@ -3,6 +3,7 @@
 
 #include <vkDuck/vulkan_base.h>
 #include <glm/glm.hpp>
+#include <filesystem>
 #include <string>
 #include <vector>
 #include <future>
@@ -129,8 +130,8 @@ struct ModelData {
     std::vector<GLTFCamera> cameras;        // Embedded cameras from GLTF
     std::vector<GLTFLight> lights;          // Embedded lights from GLTF (KHR_lights_punctual)
     std::vector<MaterialData> materials;    // PBR material data per material
-    std::vector<std::string> allTexturePaths;  // All unique texture paths (indexed by MaterialData)
-    std::vector<std::string> texturePaths;  // DEPRECATED: Legacy single texture path per material
+    std::vector<std::filesystem::path> allTexturePaths;  // All unique texture paths (indexed by MaterialData)
+    std::vector<std::filesystem::path> texturePaths;  // DEPRECATED: Legacy single texture path per material
 };
 // }}}
 
@@ -139,12 +140,12 @@ struct ModelData {
 /// @param path Path to the model file (.gltf or .glb)
 /// @param projectRoot Optional project root for texture path resolution
 /// @return ModelData containing all vertices, indices, geometry ranges, cameras, and texture paths
-ModelData loadModel(const std::string& path, const std::string& projectRoot = "");
+ModelData loadModel(const std::filesystem::path& path, const std::filesystem::path& projectRoot = "");
 
 /// Load multiple models asynchronously in parallel
 /// @param paths Vector of paths to model files
 /// @return Map of path to ModelData for each loaded model
-std::unordered_map<std::string, ModelData> loadModelsAsync(const std::vector<std::string>& paths);
+std::unordered_map<std::filesystem::path, ModelData> loadModelsAsync(const std::vector<std::filesystem::path>& paths);
 
 /// Load a specific geometry from pre-loaded model data
 /// @param data The pre-loaded model data

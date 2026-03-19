@@ -370,8 +370,8 @@ private:
     void setupFileWatcher(CachedModel& model);
     void setupDirectoryWatcher();
     void handleDirectoryChange(
-        const std::string& filepath,
-        const std::string& filename,
+        const std::filesystem::path& filepath,
+        const std::filesystem::path& filename,
         DirectoryWatcher::FileAction action
     );
     void cleanupStaleCacheEntries();
@@ -385,7 +385,7 @@ private:
     std::unordered_map<ModelHandle, std::unique_ptr<CachedModel>> cache_;
 
     // Path to handle mapping for deduplication
-    std::unordered_map<std::string, ModelHandle> pathToHandle_;
+    std::unordered_map<std::filesystem::path, ModelHandle> pathToHandle_;
 
     // Handle generation
     uint32_t nextHandleId_{0};

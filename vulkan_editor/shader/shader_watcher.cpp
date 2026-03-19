@@ -7,7 +7,7 @@ const std::vector<std::string> ShaderFileWatcher::shaderExtensions = {
     ".slang"
 };
 
-ShaderFileWatcher::ShaderFileWatcher(const std::string& watchDirectory)
+ShaderFileWatcher::ShaderFileWatcher(const std::filesystem::path& watchDirectory)
     : watchDirectory(watchDirectory)
     , fileWatcher(nullptr)
     , watchID(-1)
@@ -28,8 +28,8 @@ void ShaderFileWatcher::start() {
         return;
     }
 
-    // Add watch directory
-    watchID = fileWatcher->addWatch(watchDirectory, this, true);
+    // Add watch directory (efsw requires string)
+    watchID = fileWatcher->addWatch(watchDirectory.string(), this, true);
 
     if (watchID < 0) {
         Log::error(
@@ -65,22 +65,19 @@ void ShaderFileWatcher::setReloadCallback(ReloadCallback callback) {
 }
 
 bool ShaderFileWatcher::shouldProcessFile(
-    const std::string& filename
+    const std::filesystem::path& filename
 ) const {
     // Check if file has a shader extension
-    for (const auto& ext : shaderExtensions) {
-        if (filename.size() >= ext.size()) {
-            if (filename.compare(
-                    filename.size() - ext.size(), ext.size(), ext
-                ) == 0) {
-                return true;
-            }
+    auto ext = filename.extension().string();
+    for (const auto& shaderExt : shaderExtensions) {
+        if (ext == shaderExt) {
+            return true;
         }
     }
     return false;
 }
 
-bool ShaderFileWatcher::isDebounced(const std::string& filepath) {
+bool ShaderFileWatcher::isDebounced(const std::filesystem::path& filepath) {
     std::lock_guard<std::mutex> lock(eventMutex);
 
     auto now = std::chrono::steady_clock::now();
@@ -112,11 +109,12 @@ void ShaderFileWatcher::handleFileAction(
     std::string oldFilename
 ) {
     // Only process shader files
-    if (!shouldProcessFile(filename)) {
+    std::filesystem::path filenamePath = filename;
+    if (!shouldProcessFile(filenamePath)) {
         return;
     }
 
-    std::string fullPath = dir + filename;
+    std::filesystem::path fullPath = std::filesystem::path(dir) / filename;
 
     // Filter actions we care about
     switch (action) {
@@ -134,7 +132,7 @@ void ShaderFileWatcher::handleFileAction(
             "FileWatcher", "File moved from {} to {}", oldFilename,
             fullPath
         );
-        fullPath = dir + oldFilename;
+        fullPath = std::filesystem::path(dir) / oldFilename;
         break;
     default:
         return;

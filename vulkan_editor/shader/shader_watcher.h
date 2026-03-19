@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <efsw/efsw.hpp>
+#include <filesystem>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -18,9 +19,9 @@ class ShaderManager;
  */
 class ShaderFileWatcher : public efsw::FileWatchListener {
 public:
-    using ReloadCallback = std::function<void(const std::string& filepath)>;
+    using ReloadCallback = std::function<void(const std::filesystem::path& filepath)>;
 
-    explicit ShaderFileWatcher(const std::string& watchDirectory);
+    explicit ShaderFileWatcher(const std::filesystem::path& watchDirectory);
     ~ShaderFileWatcher();
 
     void start();
@@ -29,6 +30,7 @@ public:
     void setReloadCallback(ReloadCallback callback);
     void setDebounceDelay(int milliseconds) { debounceDelayMs = milliseconds; }
 
+    // Note: handleFileAction signature is fixed by efsw library interface
     void handleFileAction(
         efsw::WatchID watchid,
         const std::string& dir,
@@ -40,15 +42,15 @@ public:
 private:
     struct FileEvent {
         std::chrono::steady_clock::time_point timestamp;
-        std::string filepath;
+        std::filesystem::path filepath;
         efsw::Action action;
     };
 
-    bool shouldProcessFile(const std::string& filename) const;
+    bool shouldProcessFile(const std::filesystem::path& filename) const;
     void processEvent(const FileEvent& event);
-    bool isDebounced(const std::string& filepath);
+    bool isDebounced(const std::filesystem::path& filepath);
 
-    std::string watchDirectory;
+    std::filesystem::path watchDirectory;
     efsw::FileWatcher* fileWatcher;
     efsw::WatchID watchID;
     bool watching;
@@ -56,7 +58,7 @@ private:
     ReloadCallback reloadCallback;
 
     int debounceDelayMs;
-    std::unordered_map<std::string, std::chrono::steady_clock::time_point> lastEventTime;
+    std::unordered_map<std::filesystem::path, std::chrono::steady_clock::time_point> lastEventTime;
     std::mutex eventMutex;
 
     static const std::vector<std::string> shaderExtensions;

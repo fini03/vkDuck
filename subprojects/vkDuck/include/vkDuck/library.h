@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vkDuck/vulkan_base.h>
+#include <filesystem>
 #include <sstream>
 
 // Vulkan result checking {{{
@@ -147,7 +148,7 @@ private:
 // }}}
 
 // Shader utilities {{{
-std::vector<char> readFile(const std::string& filename);
+std::vector<char> readFile(const std::filesystem::path& filename);
 
 VkShaderModule createShaderModule(
     VkDevice device,

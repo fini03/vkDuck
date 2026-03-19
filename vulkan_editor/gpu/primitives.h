@@ -1,6 +1,7 @@
 #pragma once
 #include "vulkan_editor/ui/pipeline_settings.h"
 #include <array>
+#include <filesystem>
 #include <glm/glm.hpp>
 #include <span>
 #include <string>
@@ -71,7 +72,8 @@ struct LightsBuffer {
         size_t lightsSize = sizeof(LightData) * lights.size();
         gpuBuffer.resize(headerSize + lightsSize);
 
-        header.numLights = static_cast<int32_t>(lights.size());
+        // NOTE: header.numLights should be set by caller before this function
+        // It represents the actual number of active lights, not the buffer size
         std::memcpy(gpuBuffer.data(), &header, headerSize);
         if (!lights.empty()) {
             std::memcpy(gpuBuffer.data() + headerSize, lights.data(), lightsSize);
@@ -195,11 +197,11 @@ public:
     std::vector<VkVertexInputAttributeDescription> attributeDescriptions{};
 
     // For code generation: path to exported binary model data files
-    std::string vertexDataBinPath{};
-    std::string indexDataBinPath{};
+    std::filesystem::path vertexDataBinPath{};
+    std::filesystem::path indexDataBinPath{};
 
     // For code generation: original model file path and geometry index
-    std::string modelFilePath{};
+    std::filesystem::path modelFilePath{};
     uint32_t geometryIndex{0};
 
     // RECORD
@@ -297,10 +299,10 @@ public:
     VkDeviceSize imageSize{0};
 
     // For code generation: path to exported binary texture data file (legacy)
-    std::string imageDataBinPath{};
+    std::filesystem::path imageDataBinPath{};
 
     // For code generation: path to original image file (PNG, etc.) for wuffs loading
-    std::string originalImagePath{};
+    std::filesystem::path originalImagePath{};
 
     // For code generation: inline pixel data for small textures (e.g., 1x1 defaults)
     std::vector<uint8_t> inlineImageData{};
@@ -461,7 +463,8 @@ public:
 
     // Light parameters (for code generation)
     std::vector<LightData> lights;
-    int numLights{1};
+    int numLights{1};        // Buffer size (for shader array allocation)
+    int activeLightCount{1}; // Actual active lights (for header.numLights)
 
     void recordCommands(
         const Store& store,

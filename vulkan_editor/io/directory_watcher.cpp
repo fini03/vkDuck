@@ -21,7 +21,7 @@ DirectoryWatcher::~DirectoryWatcher() {
 }
 
 void DirectoryWatcher::watchDirectory(
-    const std::string& directory,
+    const std::filesystem::path& directory,
     const std::vector<std::string>& extensions,
     bool recursive
 ) {
@@ -42,8 +42,8 @@ void DirectoryWatcher::watchDirectory(
     watchExtensions_ = extensions;
     watchRecursive_ = recursive;
 
-    // Add watch on the directory
-    watchID = fileWatcher->addWatch(watchDirectory_, this, watchRecursive_);
+    // Add watch on the directory (efsw requires string)
+    watchID = fileWatcher->addWatch(watchDirectory_.string(), this, watchRecursive_);
 
     if (watchID < 0) {
         Log::error(name_, "Failed to watch directory: {}", watchDirectory_);
@@ -82,18 +82,14 @@ void DirectoryWatcher::setDirectoryChangeCallback(DirectoryChangeCallback callba
     directoryChangeCallback = callback;
 }
 
-bool DirectoryWatcher::shouldProcessFile(const std::string& filename) const {
+bool DirectoryWatcher::shouldProcessFile(const std::filesystem::path& filename) const {
     if (watchExtensions_.empty()) {
         return true; // No filter, process all files
     }
 
     // Get file extension (lowercase)
-    std::string ext;
-    size_t dotPos = filename.rfind('.');
-    if (dotPos != std::string::npos) {
-        ext = filename.substr(dotPos);
-        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-    }
+    std::string ext = filename.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
     // Check against allowed extensions
     for (const auto& allowedExt : watchExtensions_) {
@@ -107,7 +103,7 @@ bool DirectoryWatcher::shouldProcessFile(const std::string& filename) const {
     return false;
 }
 
-bool DirectoryWatcher::isDebounced(const std::string& filepath) {
+bool DirectoryWatcher::isDebounced(const std::filesystem::path& filepath) {
     std::lock_guard<std::mutex> lock(eventMutex);
 
     auto now = std::chrono::steady_clock::now();
@@ -136,12 +132,14 @@ void DirectoryWatcher::handleFileAction(
     efsw::Action action,
     std::string oldFilename
 ) {
+    std::filesystem::path filenamePath = filename;
+
     // Only process files with matching extensions
-    if (!shouldProcessFile(filename)) {
+    if (!shouldProcessFile(filenamePath)) {
         return;
     }
 
-    std::string fullPath = (std::filesystem::path(dir) / filename).string();
+    std::filesystem::path fullPath = std::filesystem::path(dir) / filename;
 
     // Convert efsw action to our FileAction enum
     FileAction fileAction;
@@ -175,7 +173,7 @@ void DirectoryWatcher::handleFileAction(
     // Call the file change callback if set
     if (fileChangeCallback) {
         try {
-            fileChangeCallback(fullPath, filename, fileAction);
+            fileChangeCallback(fullPath, filenamePath, fileAction);
         } catch (const std::exception& e) {
             Log::error(name_, "Error in file change callback: {}", e.what());
         }

@@ -1259,28 +1259,67 @@ bool PipelineNode::updateShaderReflection(
     // This must happen after reconcilePins() updates the Pin objects
     reregisterPins(graph.pinRegistry);
 
-    // Update connected LightNode's shaderArraySize when shader is updated
-    if (hasLightInput && lightInput.arraySize > 0) {
-        for (const auto& link : graph.links) {
-            if (link.endPin == lightInput.pin.id) {
-                auto startResult = graph.findPin(link.startPin);
-                if (auto* lightNode = dynamic_cast<LightNode*>(startResult.node)) {
-                    if (lightNode->shaderArraySize != lightInput.arraySize) {
-                        Log::info(
-                            "Shader",
-                            "Updating LightNode shaderArraySize from {} to {}",
-                            lightNode->shaderArraySize, lightInput.arraySize
-                        );
-                        lightNode->shaderArraySize = lightInput.arraySize;
-                        lightNode->ensureLightCount();
-                    }
+    // Note: LightNode update is done separately via updateConnectedLightNodes()
+    // This is called after pin IDs are restored (e.g., after loading a project)
+
+    return true; // Shader compilation and reflection succeeded
+}
+
+void PipelineNode::updateConnectedLightNodes(NodeGraph& graph) {
+    if (!hasLightInput || lightInput.arraySize <= 0) {
+        Log::debug("Pipeline", "updateConnectedLightNodes: skipped (hasLightInput={}, arraySize={})",
+            hasLightInput, lightInput.arraySize);
+        return;
+    }
+
+    Log::info("Pipeline", "updateConnectedLightNodes for '{}': lightInput.pin.id={}, arraySize={}, {} links in graph",
+        name, lightInput.pin.id.Get(), lightInput.arraySize, graph.links.size());
+
+    // Search for links that end at our light input pin
+    bool foundLink = false;
+    for (const auto& link : graph.links) {
+        if (link.endPin == lightInput.pin.id) {
+            foundLink = true;
+            Log::debug("Pipeline", "  Found matching link: startPin={}, endPin={}",
+                link.startPin.Get(), link.endPin.Get());
+            // Find the source LightNode
+            auto startResult = graph.findPin(link.startPin);
+            if (auto* lightNode = dynamic_cast<LightNode*>(startResult.node)) {
+                Log::info("Pipeline", "  Connected to LightNode '{}' (current shaderArraySize={}, buffer size={})",
+                    lightNode->name, lightNode->shaderArraySize,
+                    static_cast<int>(lightNode->lightsBuffer.lights.size()));
+
+                bool needsUpdate = (lightNode->shaderArraySize != lightInput.arraySize);
+                bool needsResize = (static_cast<int>(lightNode->lightsBuffer.lights.size()) <
+                                    std::max(lightNode->numLights, lightInput.arraySize));
+
+                if (needsUpdate || needsResize) {
+                    Log::info(
+                        "Pipeline",
+                        "  Updating LightNode '{}' shaderArraySize from {} to {} (needsResize={})",
+                        lightNode->name, lightNode->shaderArraySize, lightInput.arraySize, needsResize
+                    );
+                    lightNode->shaderArraySize = lightInput.arraySize;
+                    lightNode->ensureLightCount();
+                } else {
+                    Log::debug("Pipeline", "  LightNode already correctly configured");
                 }
-                break;
+            } else {
+                Log::warning("Pipeline", "  Link found but source is not a LightNode (node={})",
+                    startResult.node ? startResult.node->name : "null");
             }
+            break;
         }
     }
 
-    return true; // Shader compilation and reflection succeeded
+    if (!foundLink) {
+        Log::debug("Pipeline", "  No link found ending at lightInput.pin.id={}", lightInput.pin.id.Get());
+        // Log all links for debugging
+        for (const auto& link : graph.links) {
+            Log::debug("Pipeline", "    Link: startPin={}, endPin={}",
+                link.startPin.Get(), link.endPin.Get());
+        }
+    }
 }
 
 void PipelineNode::clearPrimitives() {

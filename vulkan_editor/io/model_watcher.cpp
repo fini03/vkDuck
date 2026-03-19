@@ -22,7 +22,7 @@ ModelFileWatcher::~ModelFileWatcher() {
     delete fileWatcher;
 }
 
-void ModelFileWatcher::watchFile(const std::string& filePath) {
+void ModelFileWatcher::watchFile(const std::filesystem::path& filePath) {
     // Stop any existing watch first
     stopWatching();
 
@@ -31,23 +31,23 @@ void ModelFileWatcher::watchFile(const std::string& filePath) {
         return;
     }
 
-    std::filesystem::path path(filePath);
-    if (!std::filesystem::exists(path)) {
+    if (!std::filesystem::exists(filePath)) {
         Log::warning("ModelFileWatcher", "File does not exist: {}", filePath);
         return;
     }
 
     watchedFilePath = filePath;
-    watchedFileName = path.filename().string();
-    watchDirectory = path.parent_path().string();
+    watchedFileName = filePath.filename();
+    watchDirectory = filePath.parent_path();
 
+    // Add watch on the directory containing the file (efsw requires string)
+    std::string watchDirStr = watchDirectory.string();
     // Ensure the directory path ends with a separator for efsw
-    if (!watchDirectory.empty() && watchDirectory.back() != '/' && watchDirectory.back() != '\\') {
-        watchDirectory += std::filesystem::path::preferred_separator;
+    if (!watchDirStr.empty() && watchDirStr.back() != '/' && watchDirStr.back() != '\\') {
+        watchDirStr += std::filesystem::path::preferred_separator;
     }
 
-    // Add watch on the directory containing the file
-    watchID = fileWatcher->addWatch(watchDirectory, this, false);
+    watchID = fileWatcher->addWatch(watchDirStr, this, false);
 
     if (watchID < 0) {
         Log::error(
@@ -86,26 +86,24 @@ void ModelFileWatcher::setReloadCallback(ReloadCallback callback) {
     reloadCallback = callback;
 }
 
-bool ModelFileWatcher::shouldProcessFile(const std::string& filename) const {
+bool ModelFileWatcher::shouldProcessFile(const std::filesystem::path& filename) const {
     // Only process if this is the exact file we're watching
     if (filename != watchedFileName) {
         return false;
     }
 
     // Check if file has a model extension
-    for (const auto& ext : modelExtensions) {
-        if (filename.size() >= ext.size()) {
-            std::string fileLower = filename;
-            std::transform(fileLower.begin(), fileLower.end(), fileLower.begin(), ::tolower);
-            if (fileLower.compare(fileLower.size() - ext.size(), ext.size(), ext) == 0) {
-                return true;
-            }
+    std::string ext = filename.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    for (const auto& modelExt : modelExtensions) {
+        if (ext == modelExt) {
+            return true;
         }
     }
     return false;
 }
 
-bool ModelFileWatcher::isDebounced(const std::string& filepath) {
+bool ModelFileWatcher::isDebounced(const std::filesystem::path& filepath) {
     std::lock_guard<std::mutex> lock(eventMutex);
 
     auto now = std::chrono::steady_clock::now();
@@ -136,12 +134,14 @@ void ModelFileWatcher::handleFileAction(
     efsw::Action action,
     std::string oldFilename
 ) {
+    std::filesystem::path filenamePath = filename;
+
     // Only process the specific model file we're watching
-    if (!shouldProcessFile(filename)) {
+    if (!shouldProcessFile(filenamePath)) {
         return;
     }
 
-    std::string fullPath = (std::filesystem::path(dir) / filename).string();
+    std::filesystem::path fullPath = std::filesystem::path(dir) / filename;
 
     // Filter actions we care about
     switch (action) {

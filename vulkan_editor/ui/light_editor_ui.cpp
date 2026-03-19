@@ -108,6 +108,8 @@ void LightEditorUI::Draw(LightNode* lightNode, MultiUBONode* uboNode, NodeGraph*
                 targetLight.color = gltfLight.color;
                 targetLight.intensity = gltfLight.intensity;
                 targetLight.radius = gltfLight.range > 0.0f ? gltfLight.range : 10.0f;
+                // Ensure header has correct count before GPU update
+                lightNode->lightsBuffer.header.numLights = lightNode->numLights;
                 lightNode->lightsBuffer.updateGpuBuffer();
             }
         }
@@ -115,7 +117,8 @@ void LightEditorUI::Draw(LightNode* lightNode, MultiUBONode* uboNode, NodeGraph*
         if (ImGui::Button("Import All GLTF Lights")) {
             // Replace all lights with GLTF lights
             lightNode->numLights = static_cast<int>(mergedLights.size());
-            lightNode->lightsBuffer.lights.resize(lightNode->numLights);
+            // Ensure buffer is sized for shader requirements
+            lightNode->ensureLightCount();
 
             for (size_t i = 0; i < mergedLights.size(); ++i) {
                 const auto& src = mergedLights[i];
@@ -125,6 +128,7 @@ void LightEditorUI::Draw(LightNode* lightNode, MultiUBONode* uboNode, NodeGraph*
                 dst.intensity = src.intensity;
                 dst.radius = src.range > 0.0f ? src.range : 10.0f;
             }
+            lightNode->lightsBuffer.header.numLights = lightNode->numLights;
             lightNode->lightsBuffer.updateGpuBuffer();
         }
 

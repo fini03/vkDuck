@@ -83,8 +83,12 @@ void LightNode::fromJson(const nlohmann::json& j) {
     if (j.contains("lights") && j["lights"].is_array()) {
         const auto& lightsArr = j["lights"];
         numLights = static_cast<int>(lightsArr.size());
-        lightsBuffer.lights.resize(numLights);
 
+        // Size buffer for max of user lights and shader's expected array size
+        int bufferLightCount = std::max(numLights, shaderArraySize);
+        lightsBuffer.lights.resize(bufferLightCount);
+
+        // Restore user's light data
         for (int i = 0; i < numLights; ++i) {
             const auto& jLight = lightsArr[i];
             auto& light = lightsBuffer.lights[i];
@@ -108,7 +112,18 @@ void LightNode::fromJson(const nlohmann::json& j) {
             light.radius = jLight.value("radius", 1.0f);
             light.intensity = jLight.value("intensity", 1.0f);
         }
+
+        // Zero-initialize padding lights (beyond numLights but within shader array)
+        for (int i = numLights; i < bufferLightCount; ++i) {
+            lightsBuffer.lights[i] = primitives::LightData{};
+        }
+
+        // Update header with actual light count and sync to GPU
+        lightsBuffer.header.numLights = numLights;
         lightsBuffer.updateGpuBuffer();
+
+        Log::debug("LightNode", "fromJson: restored {} lights, buffer sized for {} (shaderArraySize={})",
+            numLights, bufferLightCount, shaderArraySize);
     } else {
         ensureLightCount();
     }
@@ -272,8 +287,10 @@ void LightNode::createPrimitives(primitives::Store& store) {
     lightPrimitive = &store.lights[hLight.handle];
     lightPrimitive->name = name;  // Use node name for light
     lightPrimitive->ubo = hUbo;
-    // Use buffer count for code generation (allocates correct buffer size)
+    // Buffer size for shader array allocation
     lightPrimitive->numLights = bufferLightCount;
+    // Actual active light count for header.numLights
+    lightPrimitive->activeLightCount = numLights;
 
     // Copy all light data for code generation (including padding lights)
     lightPrimitive->lights.resize(bufferLightCount);

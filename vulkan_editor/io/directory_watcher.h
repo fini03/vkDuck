@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <efsw/efsw.hpp>
+#include <filesystem>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -18,8 +19,8 @@ public:
     };
 
     using FileChangeCallback = std::function<void(
-        const std::string& filepath,
-        const std::string& filename,
+        const std::filesystem::path& filepath,
+        const std::filesystem::path& filename,
         FileAction action
     )>;
 
@@ -30,7 +31,7 @@ public:
 
     // Watch a directory with specified file extensions
     void watchDirectory(
-        const std::string& directory,
+        const std::filesystem::path& directory,
         const std::vector<std::string>& extensions,
         bool recursive = true
     );
@@ -54,11 +55,11 @@ public:
     }
 
     // Get the directory being watched
-    const std::string& getWatchedDirectory() const {
+    const std::filesystem::path& getWatchedDirectory() const {
         return watchDirectory_;
     }
 
-    // efsw::FileWatchListener interface
+    // efsw::FileWatchListener interface (signature fixed by library)
     void handleFileAction(
         efsw::WatchID watchid,
         const std::string& dir,
@@ -68,11 +69,11 @@ public:
     ) override;
 
 private:
-    bool shouldProcessFile(const std::string& filename) const;
-    bool isDebounced(const std::string& filepath);
+    bool shouldProcessFile(const std::filesystem::path& filename) const;
+    bool isDebounced(const std::filesystem::path& filepath);
 
     std::string name_;
-    std::string watchDirectory_;
+    std::filesystem::path watchDirectory_;
     std::vector<std::string> watchExtensions_;
     bool watchRecursive_;
 
@@ -86,7 +87,7 @@ private:
     // Debouncing
     int debounceDelayMs;
     std::unordered_map<
-        std::string,
+        std::filesystem::path,
         std::chrono::steady_clock::time_point>
         lastEventTime;
     std::mutex eventMutex;

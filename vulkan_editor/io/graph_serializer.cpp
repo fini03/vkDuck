@@ -165,7 +165,7 @@ PipelineState::serializeLinks(const NodeGraph& graph) const {
 
 bool PipelineState::save(
     const NodeGraph& graph,
-    const std::string& filePath
+    const std::filesystem::path& filePath
 ) const {
     try {
         nlohmann::json j;
@@ -478,7 +478,7 @@ void PipelineState::deserializeLinks(
 
 bool PipelineState::load(
     NodeGraph& graph,
-    const std::string& filePath,
+    const std::filesystem::path& filePath,
     ShaderManager& shader_manager
 ) {
     try {
@@ -547,6 +547,13 @@ bool PipelineState::load(
             );
             int linkMaxId = maxId;
             deserializeLinks(j["links"], graph, linkMaxId);
+        }
+
+        // Update connected LightNodes' shaderArraySize after all links are restored
+        for (auto& node : graph.nodes) {
+            if (auto* pipeline = dynamic_cast<PipelineNode*>(node.get())) {
+                pipeline->updateConnectedLightNodes(graph);
+            }
         }
 
         Log::info(

@@ -500,7 +500,7 @@ void processLightNode(
 
 // Model loading implementation {{{
 
-ModelData loadModel(const std::string& path, const std::string& projectRoot) {
+ModelData loadModel(const std::filesystem::path& path, const std::filesystem::path& projectRoot) {
 #ifndef NDEBUG
     auto totalStart = std::chrono::high_resolution_clock::now();
 #endif
@@ -508,12 +508,13 @@ ModelData loadModel(const std::string& path, const std::string& projectRoot) {
     tinygltf::Model model;
     tinygltf::TinyGLTF loader;
     std::string err, warn;
+    std::string pathStr = path.string();
 
     bool ret = false;
-    if (path.ends_with(".glb")) {
-        ret = loader.LoadBinaryFromFile(&model, &err, &warn, path);
+    if (path.extension() == ".glb") {
+        ret = loader.LoadBinaryFromFile(&model, &err, &warn, pathStr);
     } else {
-        ret = loader.LoadASCIIFromFile(&model, &err, &warn, path);
+        ret = loader.LoadASCIIFromFile(&model, &err, &warn, pathStr);
     }
 
     if (!warn.empty()) {
@@ -521,7 +522,7 @@ ModelData loadModel(const std::string& path, const std::string& projectRoot) {
     }
 
     if (!err.empty() || !ret) {
-        throw std::runtime_error("Failed to load model: " + path + " - " + err);
+        throw std::runtime_error("Failed to load model: " + pathStr + " - " + err);
     }
 
     std::vector<TempGeometry> geometries;
@@ -646,8 +647,8 @@ ModelData loadModel(const std::string& path, const std::string& projectRoot) {
     // }}}
 
     // Extract texture paths and material data {{{
-    fs::path parentPath = fs::path(path).parent_path();
-    fs::path projRoot = projectRoot.empty() ? fs::path() : fs::path(projectRoot);
+    fs::path parentPath = path.parent_path();
+    fs::path projRoot = projectRoot.empty() ? fs::path() : projectRoot;
 
     // Collect texture URIs for batch resolution
     std::vector<std::pair<size_t, std::string>> texturesToResolve;
@@ -669,7 +670,7 @@ ModelData loadModel(const std::string& path, const std::string& projectRoot) {
     for (size_t i = 0; i < resolvedPaths.size(); ++i) {
         if (!resolvedPaths[i].empty()) {
             imageIndexToPathIndex[static_cast<int>(i)] = static_cast<int>(result.allTexturePaths.size());
-            result.allTexturePaths.push_back(resolvedPaths[i].string());
+            result.allTexturePaths.push_back(resolvedPaths[i]);
         }
     }
 
@@ -852,13 +853,13 @@ void loadModelGeometry(
     );
 }
 
-std::unordered_map<std::string, ModelData> loadModelsAsync(const std::vector<std::string>& paths) {
+std::unordered_map<std::filesystem::path, ModelData> loadModelsAsync(const std::vector<std::filesystem::path>& paths) {
 #ifndef NDEBUG
     auto totalStart = std::chrono::high_resolution_clock::now();
 #endif
 
     // Launch async tasks for each model
-    std::vector<std::future<std::pair<std::string, ModelData>>> futures;
+    std::vector<std::future<std::pair<std::filesystem::path, ModelData>>> futures;
     futures.reserve(paths.size());
 
     for (const auto& path : paths) {
@@ -868,7 +869,7 @@ std::unordered_map<std::string, ModelData> loadModelsAsync(const std::vector<std
     }
 
     // Collect results
-    std::unordered_map<std::string, ModelData> results;
+    std::unordered_map<std::filesystem::path, ModelData> results;
     results.reserve(paths.size());
 
     for (auto& future : futures) {

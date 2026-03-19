@@ -11,6 +11,14 @@
 #include <unordered_set>
 #include <vector>
 
+// Custom formatter for std::filesystem::path (not in C++23 standard library yet)
+template <>
+struct std::formatter<std::filesystem::path> : std::formatter<std::string> {
+    auto format(const std::filesystem::path& p, std::format_context& ctx) const {
+        return std::formatter<std::string>::format(p.string(), ctx);
+    }
+};
+
 enum class LogLevel { Debug, Info, Warning, Error };
 
 struct LogEntry {

@@ -219,7 +219,7 @@ void PrimitiveGenerator::generateAll(
         print(out, "if (cachedModels.empty()) {{\n");
         print(out, "    std::vector<std::filesystem::path> modelPaths = {{\n");
         for (const auto& path : uniqueModelPaths) {
-            out << "        \"" << path << "\",\n";
+            out << "        " << path << ",\n";
         }
         print(out, "    }};\n");
         print(out, "    cachedModels = loadModelsAsync(modelPaths);\n");
@@ -228,7 +228,7 @@ void PrimitiveGenerator::generateAll(
 
         // Create references to individual models for easier access
         for (const auto& path : uniqueModelPaths) {
-            out << "ModelData& " << modelPathToVarName(path) << " = loadedModels[\"" << path << "\"];\n";
+            out << "ModelData& " << modelPathToVarName(path) << " = loadedModels[" << path << "];\n";
         }
         print(out, "\n");
     }
@@ -236,11 +236,11 @@ void PrimitiveGenerator::generateAll(
     // Generate async image loading code if we have images (with caching for resize)
     if (!uniqueImagePaths.empty()) {
         print(out, "// Load all images asynchronously in parallel (cached for resize)\n");
-        print(out, "static std::unordered_map<std::filesystem::path, LoadedImage> cachedImages;\n");
+        print(out, "static std::unordered_map<std::string, LoadedImage> cachedImages;\n");
         print(out, "if (cachedImages.empty()) {{\n");
-        print(out, "    std::vector<std::filesystem::path> imagePaths = {{\n");
+        print(out, "    std::vector<std::string> imagePaths = {{\n");
         for (const auto& path : uniqueImagePaths) {
-            out << "        \"" << path << "\",\n";
+            out << "        " << path << ",\n";
         }
         print(out, "    }};\n");
         print(out, "    cachedImages = loadImagesAsync(imagePaths);\n");

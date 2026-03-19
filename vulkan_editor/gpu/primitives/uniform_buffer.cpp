@@ -337,7 +337,8 @@ void UniformBuffer::generateCreate(const Store& store, std::ostream& out) const 
 
                 // Generate light buffer initialization with header + array
                 // Buffer format: LightsHeader (16 bytes) + Light[numLights]
-                print(out, "\n    // Initialize light UBO with header + {} lights\n", light.numLights);
+                print(out, "\n    // Initialize light UBO with header + {} lights (buffer size {}, active {})\n",
+                    light.numLights, light.numLights, light.activeLightCount);
 
                 // Generate the header struct (must match shader's Lights.numLights layout)
                 print(out,
@@ -347,28 +348,30 @@ void UniformBuffer::generateCreate(const Store& store, std::ostream& out) const 
                     "    }};\n"
                 );
 
-                // Generate header initialization
-                print(out, "    LightsHeader {}_header{{ .numLights = {} }};\n", name, light.numLights);
+                // Generate header initialization - use activeLightCount for actual lights
+                print(out, "    LightsHeader {}_header{{ .numLights = {} }};\n", name, light.activeLightCount);
 
-                // Generate light array initialization
-                print(out, "    std::array<Light, {}> {}_lights{{{{\n", light.numLights, name);
-                for (int i = 0; i < light.numLights && i < static_cast<int>(light.lights.size()); ++i) {
+                // Generate light array initialization - sized to numLights (buffer size)
+                // Initialize active lights with data, padding lights with zeros
+                print(out, "    std::array<Light, {}> {}_lights{{}};\n", light.numLights, name);
+
+                // Initialize only active lights
+                for (int i = 0; i < light.activeLightCount && i < static_cast<int>(light.lights.size()); ++i) {
                     const auto& l = light.lights[i];
                     print(out,
-                        "        Light{{\n"
-                        "            .position = glm::vec3({}, {}, {}),\n"
-                        "            .radius = {},\n"
-                        "            .color = glm::vec3({}, {}, {}),\n"
-                        "            .intensity = {}\n"
-                        "        }}{}\n",
+                        "    {}_lights[{}] = Light{{\n"
+                        "        .position = glm::vec3({}, {}, {}),\n"
+                        "        .radius = {},\n"
+                        "        .color = glm::vec3({}, {}, {}),\n"
+                        "        .intensity = {}\n"
+                        "    }};\n",
+                        name, i,
                         flt(l.position.x), flt(l.position.y), flt(l.position.z),
                         flt(l.radius),
                         flt(l.color.x), flt(l.color.y), flt(l.color.z),
-                        flt(l.intensity),
-                        (i < light.numLights - 1) ? "," : ""
+                        flt(l.intensity)
                     );
                 }
-                print(out, "    }}}};\n");
 
                 // Copy header first, then light array
                 print(out, "    memcpy({}_mapped, &{}_header, sizeof(LightsHeader));\n", name, name);

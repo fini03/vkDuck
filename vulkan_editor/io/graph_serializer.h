@@ -1,6 +1,7 @@
 #pragma once
 #include "../graph/node.h"
 #include "../shader/shader_types.h"
+#include <filesystem>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -29,13 +30,13 @@ public:
     // Save both pipeline state AND global config
     bool save(
         const NodeGraph& graph,
-        const std::string& filePath
+        const std::filesystem::path& filePath
     ) const;
 
     // Load both pipeline state AND global config
     bool load(
         NodeGraph& graph,
-        const std::string& filePath,
+        const std::filesystem::path& filePath,
         ShaderManager& shader_manager
     );
 

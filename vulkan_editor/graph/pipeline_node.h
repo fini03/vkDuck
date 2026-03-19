@@ -104,6 +104,10 @@ public:
     PinType bindingInfoToPinType(const BindingInfo& binding);
     bool updateShaderReflection(NodeGraph& graph, const std::filesystem::path& projectRoot = {});
 
+    /// Update connected LightNodes' shaderArraySize based on this pipeline's light input.
+    /// Should be called after pin IDs are restored (e.g., after loading a project).
+    void updateConnectedLightNodes(NodeGraph& graph);
+
     std::vector<BindingInfo> mergeBindings(
         const std::vector<BindingInfo>& vertexBindings,
         const std::vector<BindingInfo>& fragmentBindings

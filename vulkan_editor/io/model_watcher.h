@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <efsw/efsw.hpp>
+#include <filesystem>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -17,13 +18,13 @@ public:
     };
 
     using ReloadCallback =
-        std::function<void(const std::string& filepath)>;
+        std::function<void(const std::filesystem::path& filepath)>;
 
     explicit ModelFileWatcher();
     ~ModelFileWatcher();
 
     // Watch a specific model file
-    void watchFile(const std::string& filePath);
+    void watchFile(const std::filesystem::path& filePath);
 
     // Stop watching current file
     void stopWatching();
@@ -55,11 +56,11 @@ public:
     }
 
     // Get the file being watched
-    const std::string& getWatchedFile() const {
+    const std::filesystem::path& getWatchedFile() const {
         return watchedFilePath;
     }
 
-    // efsw::FileWatchListener interface
+    // efsw::FileWatchListener interface (signature fixed by library)
     void handleFileAction(
         efsw::WatchID watchid,
         const std::string& dir,
@@ -71,17 +72,17 @@ public:
 private:
     struct FileEvent {
         std::chrono::steady_clock::time_point timestamp;
-        std::string filepath;
+        std::filesystem::path filepath;
         efsw::Action action;
     };
 
-    bool shouldProcessFile(const std::string& filename) const;
+    bool shouldProcessFile(const std::filesystem::path& filename) const;
     void processEvent(const FileEvent& event);
-    bool isDebounced(const std::string& filepath);
+    bool isDebounced(const std::filesystem::path& filepath);
 
-    std::string watchedFilePath;
-    std::string watchedFileName;
-    std::string watchDirectory;
+    std::filesystem::path watchedFilePath;
+    std::filesystem::path watchedFileName;
+    std::filesystem::path watchDirectory;
     efsw::FileWatcher* fileWatcher;
     efsw::WatchID watchID;
     bool watching;
@@ -95,7 +96,7 @@ private:
     // Debouncing to avoid multiple rapid reloads
     int debounceDelayMs;
     std::unordered_map<
-        std::string,
+        std::filesystem::path,
         std::chrono::steady_clock::time_point>
         lastEventTime;
     std::mutex eventMutex;
