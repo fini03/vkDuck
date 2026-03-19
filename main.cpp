@@ -128,10 +128,24 @@ void initWindow() {
         return;
     }
 
+    // Get display bounds to avoid creating a window larger than the screen
+    SDL_Rect displayBounds;
+    int windowWidth = 1920;
+    int windowHeight = 1080;
+
+    if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &displayBounds)) {
+        // Leave some margin for window decorations and taskbar
+        int maxWidth = displayBounds.w - 100;
+        int maxHeight = displayBounds.h - 100;
+
+        if (windowWidth > maxWidth) windowWidth = maxWidth;
+        if (windowHeight > maxHeight) windowHeight = maxHeight;
+    }
+
     SDL_WindowFlags window_flags =
         (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
     window =
-        SDL_CreateWindow("vkDuck", 1920, 1080, window_flags);
+        SDL_CreateWindow("vkDuck", windowWidth, windowHeight, window_flags);
     if (!window) {
         std::cerr << "SDL_CreateWindow Error: " << SDL_GetError()
                   << std::endl;
