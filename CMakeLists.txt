@@ -244,6 +244,7 @@ add_executable(vkDuckEditor
 
     # Configuration
     vulkan_editor/config/vulkan_enums.cpp
+    vulkan_editor/config/recent_projects.cpp
 
     # UI
     vulkan_editor/asset/asset_library_ui.cpp
