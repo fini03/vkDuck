@@ -547,6 +547,31 @@ void FileGenerator::generatePrimitives(
         }
     }
 
+    // === ADD DEFAULT LIGHT STRUCT IF NEEDED ===
+    // If there are Light UBOs in the store but no shader defined the Light struct,
+    // add a default Light struct definition to avoid compilation errors
+    bool hasLightUbos = false;
+    for (const auto& ub : store.uniformBuffers) {
+        if (ub.dataType == primitives::UniformDataType::Light) {
+            hasLightUbos = true;
+            break;
+        }
+    }
+    if (hasLightUbos && generatedStructNames.find("Light") == generatedStructNames.end()) {
+        // Create a default Light struct matching what uniform_buffer.cpp generates
+        ShaderTypes::StructInfo lightStruct;
+        lightStruct.structName = "Light";
+        lightStruct.members = {
+            { "position", "float3", "vector", 0, 0 },
+            { "radius", "float", "scalar", 12, 0 },
+            { "color", "float3", "vector", 16, 0 },
+            { "intensity", "float", "scalar", 28, 0 }
+        };
+        allStructs.push_back(lightStruct);
+        generatedStructNames.insert("Light");
+        Log::info("FileGenerator", "Added default Light struct (no shader uses lights but Light UBOs exist)");
+    }
+
     // === GENERATE PRIMITIVES.H ===
     {
         auto outFile = outputDir / "primitives.h";

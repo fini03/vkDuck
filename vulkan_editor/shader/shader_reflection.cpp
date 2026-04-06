@@ -97,6 +97,15 @@ static const char* getScalarTypeName(slang::TypeReflection::ScalarType scalar) {
     }
 }
 
+// Strip module prefix from struct name (e.g., "common.Light" -> "Light")
+static std::string stripModulePrefix(const std::string& name) {
+    size_t lastDot = name.rfind('.');
+    if (lastDot != std::string::npos) {
+        return name.substr(lastDot + 1);
+    }
+    return name;
+}
+
 std::string ShaderReflection::getFullTypeName(slang::TypeReflection* type) {
     std::string base = getScalarTypeName(type->getScalarType());
 
@@ -119,7 +128,7 @@ std::string ShaderReflection::getFullTypeName(slang::TypeReflection* type) {
 
     case slang::TypeReflection::Kind::Struct: {
         const char* name = type->getName();
-        return name ? name : "struct";
+        return name ? stripModulePrefix(name) : "struct";
     }
 
     default:
@@ -216,7 +225,8 @@ static StructInfo extractStructFromType(
     int arraySize
 ) {
     StructInfo info;
-    info.structName = structType->getName() ? structType->getName() : "";
+    std::string rawName = structType->getName() ? structType->getName() : "";
+    info.structName = stripModulePrefix(rawName);
     info.instanceName = instanceName;
     info.arraySize = arraySize;
 
