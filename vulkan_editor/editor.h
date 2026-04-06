@@ -1,6 +1,7 @@
 #pragma once
 
 #include "asset/model_manager.h"
+#include "config/recent_projects.h"
 #include "io/file_generator.h"
 #include "io/graph_serializer.h"
 #include "imgui.h"
@@ -56,11 +57,13 @@ private:
     void showLiveView();
     void askForProjectRoot();
     void renderPopupNotifications();
+    void selectProject(const std::filesystem::path& path);
 
     ed::EditorContext* context = nullptr;
 
     std::filesystem::path projectRoot;
     bool projectSelected = false;
+    RecentProjects recentProjects;
 
     bool pendingLoadPositionSync = false;
     bool pendingSavePositionSync = false;

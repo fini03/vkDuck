@@ -666,13 +666,7 @@ void Editor::showGlobalSettingsView() {
             );
 
             if (!root.empty()) {
-                projectRoot = root;
-                shader_manager->setProjectRoot(root);
-                Logger::instance().setProjectRoot(root);
-                g_modelManager->setProjectRoot(root);
-                shader_manager->scanShaders();
-                g_modelManager->scanModels();
-                projectSelected = true;
+                selectProject(root);
             }
         }
 
@@ -689,6 +683,17 @@ void Editor::showGlobalSettingsView() {
     }
 }
 
+void Editor::selectProject(const std::filesystem::path& path) {
+    projectRoot = path;
+    shader_manager->setProjectRoot(path.string());
+    Logger::instance().setProjectRoot(path.string());
+    g_modelManager->setProjectRoot(path.string());
+    shader_manager->scanShaders();
+    g_modelManager->scanModels();
+    projectSelected = true;
+    recentProjects.addProject(path);
+}
+
 void Editor::askForProjectRoot() {
     ImGui::OpenPopup("Select Project Folder");
 
@@ -700,19 +705,38 @@ void Editor::askForProjectRoot() {
         ImGui::Text("Select the root folder of your project");
         ImGui::Spacing();
 
-        if (ImGui::Button("Browse...", ImVec2(200, 0))) {
+        // Show recent projects if available
+        if (recentProjects.hasRecent()) {
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Recent Projects:");
+            ImGui::Spacing();
+
+            for (const auto& recentPath : recentProjects.getRecent()) {
+                std::string displayName = recentPath.filename().string();
+                std::string fullPath = recentPath.string();
+
+                // Show folder name as button, full path as tooltip
+                if (ImGui::Button(displayName.c_str(), ImVec2(280, 0))) {
+                    selectProject(recentPath);
+                    ImGui::CloseCurrentPopup();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", fullPath.c_str());
+                }
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+        }
+
+        if (ImGui::Button("Browse...", ImVec2(280, 0))) {
             std::string root = cr::utils::FileDialogs::SelectDirectory(
                 "Select Project Root"
             );
 
             if (!root.empty()) {
-                projectRoot = root;
-                shader_manager->setProjectRoot(root);
-                Logger::instance().setProjectRoot(root);
-                g_modelManager->setProjectRoot(root);
-                g_modelManager->scanModels();
-                projectSelected = true;
-
+                selectProject(root);
                 ImGui::CloseCurrentPopup();
             }
         }
